@@ -21,6 +21,7 @@ import { useUIStore } from "@/stores/ui-store";
 import { Avatar } from "@/components/shared/Avatar";
 import { Ticks } from "@/components/shared/Ticks";
 import { AudioPlayer } from "@/components/chat/AudioPlayer";
+import { StickerImage } from "@/components/chat/StickerPicker";
 import { EmojiGrid, QUICK_EMOJIS } from "@/components/emoji/EmojiPicker";
 import { formatTime, formatBytes } from "@shared/format";
 import { EDIT_WINDOW_MS } from "@shared/constants";
@@ -75,6 +76,12 @@ export const MessageBubble = memo(function MessageBubble({
   const deleted = message.deletedAt !== null;
   const pending = !!message.pending;
   const failed = !!message.failed;
+  // ⚠️ These computed consts must be declared ABOVE the STICKER branch —
+  // the STICKER toolbar (line ~210+) uses both menuOpen and timeLabel.
+  // Declaring them later triggered TDZ ("Cannot access 'X' before
+  // initialization") once any STICKER message rendered in the chat.
+  const menuOpen = actionsOpen || reactBarOpen || fullPickerOpen;
+  const timeLabel = formatTime(new Date(message.createdAt));
   const canEdit =
     mine && message.type === "TEXT" && !deleted && !pending && !failed &&
     Date.now() - new Date(message.createdAt).getTime() < EDIT_WINDOW_MS;
@@ -316,12 +323,11 @@ export const MessageBubble = memo(function MessageBubble({
                 )}
               </div>
             )}
-            {/* Sticker image: 160×160 desktop, 120×120 mobile, no bubble */}
-            <img
-              src={message.sticker.url}
-              alt={message.sticker.emoji ? `${message.sticker.emoji} sticker` : "Sticker"}
-              draggable={false}
-              loading="lazy"
+            {/* Sticker image: 160×160 desktop, 120×120 mobile, no bubble.
+                Uses StickerImage so .tgs / application/lottie+json stickers
+                render as Lottie animations, not as broken <img> tags. */}
+            <StickerImage
+              sticker={message.sticker}
               className="w-[120px] h-[120px] md:w-[160px] md:h-[160px] object-contain select-none pointer-events-auto"
             />
             {message.reactions.length > 0 && (
@@ -353,8 +359,8 @@ export const MessageBubble = memo(function MessageBubble({
     );
   }
 
-  const timeLabel = formatTime(new Date(message.createdAt));
-  const menuOpen = actionsOpen || reactBarOpen || fullPickerOpen;
+  // timeLabel and menuOpen are declared near the top of the component
+  // (used by STICKER branch above).
 
   return (
     <div

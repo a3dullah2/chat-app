@@ -154,3 +154,38 @@ Stage Summary:
 - Six real production bugs were found and fixed (duplicate-send broadcast, NewChatDialog cache invalidation, socket URL configurability, Caddyfile port, test DB setup, E2E gateway routing).
 - Test infrastructure: isolated test DB at `db/test.db`, in-process socket service for integration tests, Caddy gateway on :81 for E2E, Playwright with `--reporter=line`.
 - All tests green; the webapp is production-ready.
+
+---
+Task ID: 5
+Agent: Super Z (main agent)
+Task: Implement stickers feature per approved plan — Option B (add Lottie support via lottie-react + pako). User confirmed they have a Telegram bot token.
+
+Work Log:
+- Verified state from prior session: schema (StickerPack/Sticker/UserStickerRecent/UserStickerFavorite + Message.stickerId + STICKER type), seed (3 bundled packs × 26 stickers: Cats/Emojis/Hearts), bundled assets in public/stickers/, StickerPicker.tsx (553 lines), Composer sticker button + popover + sendSticker(), MessageBubble STICKER branch, API routes (/api/stickers, /api/stickers/recent, /api/stickers/favorites, /api/stickers/[id]/favorite, /api/stickers/upload, /api/stickers/import-telegram), src/lib/stickers/telegram.ts (with .tgs→JSON via pako), lottie-react + pako installed, tests/unit/stickers.test.ts (32 tests). 266 unit/integration tests passing, lint clean.
+- Added user-provided Telegram bot token to .env (TELEGRAM_BOT_TOKEN), kept .env gitignored.
+- Verified end-to-end via scripts/probe-sticker-api.ts: GET /api/stickers returns 3 packs; /recent and /favorites empty initially; POST /[id]/favorite adds; DELETE removes; POST /import-telegram rejects invalid input with 422.
+- Verified Telegram import for real packs via scripts/probe-telegram-real.ts: Animals (50 stickers), bongo_cat (2), Peach (1) imported successfully — STICKERSET_INVALID for non-existent packs; rate-limit (5/hour) kicks in after multiple imports. Telegram sticker files persisted to uploads/ as .webp/.json files.
+- Verified send-sticker pipeline via scripts/probe-send-sticker.ts: POST /api/conversations/[id]/messages with type=STICKER + stickerId persists (201), message.sticker relation resolves with packName and url, /api/stickers/recent auto-populates with the just-sent sticker (slice 2 ✅).
+- Verified personal uploads via scripts/probe-upload-sticker.ts: POST /api/stickers/upload accepts multipart file + emoji, lazily creates "My Uploads" pack (slug my-uploads-<userId>, source USER_UPLOAD), GET /api/stickers includes the personal pack with the uploaded sticker (slice 3 ✅).
+- BUG FOUND & FIXED (pre-existing, surfaced once first STICKER message rendered): MessageBubble.tsx declared `const menuOpen = ...` and `const timeLabel = ...` AFTER the STICKER branch's early `return`, but the STICKER toolbar uses both. This caused TDZ errors ("Cannot access 'menuOpen' before initialization" then "Cannot access 'timeLabel' before initialization") and the chat pane crashed via ChatErrorBoundary the moment any STICKER message rendered. Fix: moved both declarations above the STICKER branch with a comment explaining why. Lint clean after.
+- BUG FOUND & FIXED (also pre-existing, same trigger): MessageBubble.tsx rendered the STICKER as a plain `<img src={sticker.url}>`, which fails for `application/lottie+json` stickers (Lottie JSON is not a renderable image). Fix: replaced the inline `<img>` with the shared `<StickerImage>` component (already exported from StickerPicker.tsx), which dispatches to a dynamically-imported lottie-react player when `sticker.mime === "application/lottie+json"`. Now animated .tgs stickers (the typical Telegram format) render correctly in the message thread as well as in the picker (slice 5 ✅).
+- Browser verification (agent-browser through gateway :81):
+  - Logged in as demo@chatapp.com, opened "Weekend Trip" chat → sticker picker button visible in composer toolbar.
+  - Clicked sticker button → picker opened with 9 tabs: Recent | Favorites | Cats | Emojis | Hearts | My Uploads | Just zoo it! | Martin | bongocat (the last 3 are the Telegram-imported packs).
+  - Clicked "Send sticker 😺 from Cats" → picker closed, no console errors, message persisted to DB (verified: 2 STICKER messages from Demo User in Weekend Trip chat).
+  - Full snapshot shows the sticker rendered at the bottom of the chat thread: "You · 7:07 PM · 😺" and a grouped "😺" at 7:11 PM (the 5-min grouping rule correctly suppresses the duplicated sender header). Read-receipt "Sent" image appears next to the first sticker.
+  - Opened "Add a Telegram sticker pack" modal → filled "https://t.me/addstickers/Animals" → "Import pack" button enabled → clicked → modal closed, picker reopened, "Just zoo it!" tab still present (idempotent re-import returned existing pack).
+- Captured screenshots in download/: sticker-picker-populated.png (picker with all tabs visible), sticker-telegram-import-filled.png (modal with link filled), sticker-telegram-import-modal.png.
+- Final verification: `bun run lint` clean (0 warnings); `bun run test` 10 files / 266 tests passing (including 32 sticker unit tests + existing 21 socket integration tests that verify idempotent duplicate-send handling).
+
+Stage Summary:
+- All 5 sticker slices implemented and verified end-to-end:
+  1. Schema + STICKER message type + bundled packs (3 packs × 26 stickers) + 160×160 renderer ✅
+  2. Composer sticker button + picker UI with tabs (Recent, Favorites, per-pack) + auto-populated Recent ✅
+  3. Personal sticker uploads (multipart, ≤500 KB, PNG/WebP/GIF) + lazily-created "My Uploads" pack ✅
+  4. Telegram pack import endpoint (uses TELEGRAM_BOT_TOKEN, fetches via Bot API, downloads each sticker, .tgs→JSON via pako, persists to uploads/, dedup by telegramName+ownerId, rate-limited 5/hour) ✅
+  5. Lottie rendering in both picker AND message thread (StickerImage component, dynamic lottie-react import) ✅
+- Two pre-existing bugs found and fixed by triggering the first-ever STICKER render: TDZ on menuOpen/timeLabel in MessageBubble (declarations were after the early-return STICKER branch), and MessageBubble used inline <img> instead of StickerImage (would have failed for .tgs/Lottie stickers).
+- Demo data: 3 real Telegram packs imported (Animals×50, bongo_cat×2, Peach×1) and 1 personal upload (wink_cat.webp) as a demonstration. User can manage these via the picker UI.
+- Screenshots in download/ for user reference.
+- SECURITY: TELEGRAM_BOT_TOKEN is in .env (gitignored). User should regenerate this token via @BotFather (/revoke) since it was shared in plaintext in the IM conversation.
