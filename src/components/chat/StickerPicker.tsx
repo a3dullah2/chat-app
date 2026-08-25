@@ -1,11 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
-import { Search, Star, Clock, Plus, Loader2, Upload } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import { Search, Star, Clock, Loader2, Upload, Link as LinkIcon } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useStickerPickerStore } from "@/stores/sticker-picker-store";
 import type { StickerDTO } from "@shared/types";
+
+// Lottie is only loaded when an animated (.tgs/.json) sticker needs to render.
+// Keeps the picker bundle smaller for the common case (WebP/GIF/PNG).
+const Lottie = dynamic(() => import("lottie-react").then((m) => m.default), {
+  ssr: false,
+});
 
 interface StickerPickerProps {
   /** Called when the user clicks a sticker tile. The parent decides what to do (send / preview / etc). */
@@ -17,6 +24,8 @@ interface StickerPickerProps {
   className?: string;
 }
 
+type Modal = "none" | "telegram" | "upload";
+
 /**
  * Sticker picker popover. Rendered inside a Radix PopoverContent by the
  * composer; can also render as a sheet on mobile (vaul).
@@ -27,8 +36,6 @@ interface StickerPickerProps {
 export function StickerPicker({
   onPickSticker,
   showAddActions = true,
-  onAddTelegramPack,
-  onUploadSticker,
   className,
 }: StickerPickerProps) {
   const {
@@ -44,6 +51,7 @@ export function StickerPicker({
     setActiveTab,
   } = useStickerPickerStore();
 
+  const [modal, setModal] = useState<Modal>("none");
   const didInit = useRef(false);
   useEffect(() => {
     if (didInit.current) return;
@@ -163,33 +171,46 @@ export function StickerPicker({
       </div>
 
       {/* Add actions footer */}
-      {showAddActions && (onAddTelegramPack || onUploadSticker) && (
+      {showAddActions && (
         <div className="flex items-center gap-1 border-t border-border px-2 py-1.5 bg-surface-container">
-          {onAddTelegramPack && (
-            <button
-              type="button"
-              onClick={() => {
-                onAddTelegramPack?.();
-              }}
-              className="flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground hover:bg-surface-container-high hover:text-foreground transition-colors focus-visible:outline-2 focus-visible:outline-ring"
-              aria-label="Add a Telegram sticker pack"
-            >
-              <Plus className="h-3.5 w-3.5" aria-hidden />
-              Add Telegram pack
-            </button>
-          )}
-          {onUploadSticker && (
-            <button
-              type="button"
-              onClick={() => onUploadSticker?.()}
-              className="flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground hover:bg-surface-container-high hover:text-foreground transition-colors focus-visible:outline-2 focus-visible:outline-ring"
-              aria-label="Upload your own sticker"
-            >
-              <Upload className="h-3.5 w-3.5" aria-hidden />
-              Upload
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setModal("telegram")}
+            className="flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground hover:bg-surface-container-high hover:text-foreground transition-colors focus-visible:outline-2 focus-visible:outline-ring"
+            aria-label="Add a Telegram sticker pack"
+          >
+            <LinkIcon className="h-3.5 w-3.5" aria-hidden />
+            Add Telegram pack
+          </button>
+          <button
+            type="button"
+            onClick={() => setModal("upload")}
+            className="flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground hover:bg-surface-container-high hover:text-foreground transition-colors focus-visible:outline-2 focus-visible:outline-ring"
+            aria-label="Upload your own sticker"
+          >
+            <Upload className="h-3.5 w-3.5" aria-hidden />
+            Upload
+          </button>
         </div>
+      )}
+
+      {modal === "telegram" && (
+        <TelegramImportModal
+          onClose={() => setModal("none")}
+          onImported={() => {
+            setModal("none");
+            void loadPacks();
+          }}
+        />
+      )}
+      {modal === "upload" && (
+        <UploadStickerModal
+          onClose={() => setModal("none")}
+          onUploaded={() => {
+            setModal("none");
+            void loadPacks();
+          }}
+        />
       )}
     </div>
   );
@@ -272,10 +293,7 @@ function EmptyTab({ tabId }: { tabId: string }) {
 /**
  * Renders a sticker image. Picks the right tag based on MIME:
  *   - image/* → <img>
- *   - application/lottie+json → <Lottie> (added in slice 4)
- *
- * For now Lottie MIME renders a broken-image placeholder; once lottie-react
- * is installed in slice 4, this branch will render the animation.
+ *   - application/lottie+json → <Lottie> (renders the Lottie animation inline)
  */
 export function StickerImage({
   sticker,
@@ -287,11 +305,42 @@ export function StickerImage({
   size?: number;
 }) {
   const isLottie = sticker.mime === "application/lottie+json";
+  const [lottieData, setLottieData] = useState<object | null>(null);
+
+  useEffect(() => {
+    if (!isLottie) return;
+    let cancelled = false;
+    // Sticker JSON is small (~2-10 KB). Fetch lazily so the picker only
+    // pulls down Lottie data for stickers it actually renders.
+    fetch(sticker.url)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((data) => {
+        if (!cancelled) setLottieData(data);
+      })
+      .catch(() => {
+        // Fall back to the emoji placeholder on fetch failure.
+        if (!cancelled) setLottieData(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isLottie, sticker.url]);
+
   if (isLottie) {
-    // Placeholder until slice 4 ships lottie-react support.
+    if (lottieData) {
+      return (
+        <Lottie
+          animationData={lottieData}
+          loop
+          autoplay
+          className={cn(className)}
+          style={size ? { width: size, height: size } : undefined}
+        />
+      );
+    }
     return (
       <span
-        className={cn("inline-flex items-center justify-center", className)}
+        className={cn("inline-flex items-center justify-center animate-pulse", className)}
         style={size ? { width: size, height: size } : undefined}
         aria-label={`Animated sticker ${sticker.emoji ?? ""}`}
       >
@@ -309,5 +358,196 @@ export function StickerImage({
       draggable={false}
       className={cn("object-contain pointer-events-none select-none", className)}
     />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Modals — Add Telegram pack + Upload sticker
+// ---------------------------------------------------------------------------
+
+function TelegramImportModal({
+  onClose,
+  onImported,
+}: {
+  onClose: () => void;
+  onImported: () => void;
+}) {
+  const [packLink, setPackLink] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/stickers/import-telegram", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ packLink: packLink.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Import failed");
+        return;
+      }
+      const skip = data.skipped > 0 ? ` (${data.skipped} skipped)` : "";
+      toast.success(`Imported "${data.name}" — ${data.stickerCount} sticker${data.stickerCount === 1 ? "" : "s"}${skip}`);
+      onImported();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div
+      className="absolute inset-0 z-40 flex flex-col bg-popover text-popover-foreground p-3 gap-2"
+      role="dialog"
+      aria-label="Add a Telegram sticker pack"
+    >
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold">Add a Telegram sticker pack</p>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-muted-foreground hover:text-foreground text-sm"
+          aria-label="Close"
+        >
+          Cancel
+        </button>
+      </div>
+      <input
+        type="url"
+        value={packLink}
+        onChange={(e) => setPackLink(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && packLink.trim() && !loading) void submit();
+        }}
+        placeholder="https://t.me/addstickers/PackName"
+        autoFocus
+        disabled={loading}
+        aria-label="Telegram pack link"
+        className="w-full rounded-[12px] border border-border bg-surface-container-high px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      />
+      <p className="text-[11px] text-muted-foreground">
+        Paste a Telegram sticker pack link. The pack lands in your personal library — only you can use it.
+      </p>
+      {error && (
+        <p className="text-xs text-destructive" role="alert">
+          {error}
+        </p>
+      )}
+      <button
+        type="button"
+        onClick={() => void submit()}
+        disabled={loading || !packLink.trim()}
+        className="mt-1 rounded-full bg-primary text-primary-foreground text-sm font-medium py-2 px-3 disabled:opacity-50 hover:bg-primary/90 transition-colors focus-visible:outline-2 focus-visible:outline-ring"
+      >
+        {loading ? "Importing…" : "Import pack"}
+      </button>
+    </div>
+  );
+}
+
+function UploadStickerModal({
+  onClose,
+  onUploaded,
+}: {
+  onClose: () => void;
+  onUploaded: () => void;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [emoji, setEmoji] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const submit = async () => {
+    if (!file) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      if (emoji.trim()) form.append("emoji", emoji.trim());
+      const res = await fetch("/api/stickers/upload", { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Upload failed");
+        return;
+      }
+      toast.success("Sticker added to your library");
+      onUploaded();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div
+      className="absolute inset-0 z-40 flex flex-col bg-popover text-popover-foreground p-3 gap-2"
+      role="dialog"
+      aria-label="Upload a sticker"
+    >
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold">Upload a sticker</p>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-muted-foreground hover:text-foreground text-sm"
+          aria-label="Close"
+        >
+          Cancel
+        </button>
+      </div>
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        className="w-full rounded-[12px] border-2 border-dashed border-border bg-surface-container-high px-3 py-4 text-sm text-muted-foreground hover:bg-surface-container-highest transition-colors focus-visible:outline-2 focus-visible:outline-ring"
+      >
+        {file ? (
+          <span className="text-foreground">{file.name} ({Math.round(file.size / 1024)} KB)</span>
+        ) : (
+          "Click to pick a PNG / WebP / GIF (≤ 500 KB)"
+        )}
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/webp,image/gif"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) setFile(f);
+          e.target.value = "";
+        }}
+      />
+      <input
+        type="text"
+        value={emoji}
+        onChange={(e) => setEmoji(e.target.value)}
+        placeholder="Optional emoji (e.g. 😀)"
+        maxLength={16}
+        disabled={loading}
+        aria-label="Optional emoji"
+        className="w-full rounded-[12px] border border-border bg-surface-container-high px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      />
+      {error && (
+        <p className="text-xs text-destructive" role="alert">
+          {error}
+        </p>
+      )}
+      <button
+        type="button"
+        onClick={() => void submit()}
+        disabled={loading || !file}
+        className="mt-1 rounded-full bg-primary text-primary-foreground text-sm font-medium py-2 px-3 disabled:opacity-50 hover:bg-primary/90 transition-colors focus-visible:outline-2 focus-visible:outline-ring"
+      >
+        {loading ? "Uploading…" : "Add to library"}
+      </button>
+    </div>
   );
 }

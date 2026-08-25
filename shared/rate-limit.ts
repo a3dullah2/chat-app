@@ -41,3 +41,4 @@ export class RateLimiter {
 export const loginLimiter = new RateLimiter();
 export const messageLimiter = new RateLimiter();
 export const uploadLimiter = new RateLimiter();
+export const stickerImportLimiter = new RateLimiter();

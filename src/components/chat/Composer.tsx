@@ -561,7 +561,7 @@ export function Composer({
               onPickSticker={(sticker) => {
                 void sendSticker({ id: sticker.id });
               }}
-              showAddActions={false}
+              showAddActions
             />
           </PopoverContent>
         </Popover>
