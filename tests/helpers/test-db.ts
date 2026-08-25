@@ -33,9 +33,13 @@ export async function resetTestDb(): Promise<void> {
   await db.reaction.deleteMany();
   await db.messageStatus.deleteMany();
   await db.attachment.deleteMany();
+  await db.userStickerFavorite.deleteMany();
+  await db.userStickerRecent.deleteMany();
   await db.message.deleteMany();
   await db.participant.deleteMany();
   await db.conversation.deleteMany();
+  await db.sticker.deleteMany();
+  await db.stickerPack.deleteMany();
   await db.user.deleteMany();
 }
 
