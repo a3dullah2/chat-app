@@ -1,0 +1,49 @@
+name: ✨ Feature Request
+description: Suggest a new feature or an improvement to existing behavior
+title: "[feat] "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea! Tell us what you'd like and why.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do? What's frustrating about the current behavior?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should happen instead? Be concrete — mockups welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: scope
+    attributes:
+      label: Affected areas
+      description: Check the relevant surfaces.
+      placeholder: "REST API, Socket.IO, UI (sidebar / composer / message row), DB schema, docs"
+  - type: dropdown
+    id: size
+    attributes:
+      label: Rough size
+      options:
+        - "Tiny (< 1 hr)"
+        - "Small (1–4 hrs)"
+        - "Medium (1–2 days)"
+        - "Large (1+ week)"
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Confirm
+      options:
+        - label: I have searched existing issues for duplicates
+          required: true

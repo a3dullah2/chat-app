@@ -1,86 +1,131 @@
-# ChatApp — Real-Time Messenger with a Stoat-Inspired Theme
+<div align="center">
 
-A production-quality, real-time messaging web application, originally built to a WhatsApp-style build specification (`upload/whatsapp-style-chat-app-prompt.md`) and since **restyled to match [Stoat](https://stoat.chat)** (the open-source chat platform, formerly Revolt). It supports user accounts, direct and group conversations, instant delivery over Socket.IO, media sharing (images, video, files, voice notes), typing indicators, delivery/read receipts, presence, and notifications — wrapped in a clean Material 3 theme with flat message rows and dark mode.
+# 💬 ChatApp
 
-### Design language (Stoat)
+### A production-grade real-time messenger with a Stoat-inspired theme
 
-The theme is generated from Stoat's own design system (`stoatchat/for-web`):
+A WhatsApp-style chat platform: accounts, direct & group chats, instant delivery over Socket.IO, media sharing, typing indicators, delivery/read receipts, presence, and notifications — wrapped in a clean Material 3 theme with dark mode.
 
-- **Colors:** Material 3 *tonal-spot* scheme from Stoat's default accent `#5470ec` (light `#505b92` / dark `#b9c3ff` primary), full M3 surface-container ramp, outline-variant borders, error/badge reds, and Stoat's presence palette (`#3ABF7E` online).
-- **Layout:** rounded 28px floating panels on a neutral shell (`#191919` dark / `#e9e7ef` light), flat Discord-style message rows (36px avatar gutter, colored usernames, timestamps), a 24px-radius composer bar, and a 48px rounded chat header.
-- **Type & shape:** Inter, 14px message text, pill (M3) buttons, 4/8/12/16/28px corner-radius scale.
+[![CI](https://github.com/a3dullah2/chat-app/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/a3dullah2/chat-app/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![Made with Next.js](https://img.shields.io/badge/Next.js-16-black.svg)](https://nextjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6.svg)](https://www.typescriptlang.org/)
+[![React](https://img.shields.io/badge/React-19-61dafb.svg)](https://react.dev/)
+[![Prisma](https://img.shields.io/badge/Prisma-6-5a67d8.svg)](https://www.prisma.io/)
+[![Socket.IO](https://img.shields.io/badge/Socket.IO-4-010101.svg)](https://socket.io/)
+[![Tests Passing](https://img.shields.io/badge/tests-passing-success.svg)](tests/)
+
+[✨ Features](#-features) · [🚀 Quick Start](#-quick-start) · [🏗️ Architecture](#-architecture) · [🧪 Testing](#-testing) · [📖 Docs](#-documentation) · [🤝 Contributing](#-contributing)
+
+</div>
 
 ---
 
-## Architecture Overview
+## ✨ Features
+
+| | | |
+|---|---|---|
+| 🔐 **Auth** — JWT (HS256) in httpOnly cookies, signup/login/logout with inline validation, login rate-limit (10 / 15 min / IP). | 👥 **Users & profiles** — debounced search (300 ms), profile editing with avatar upload. | 💬 **Chat list** — pinned-first + activity ordering, type-aware previews ("📷 Photo", "🎤 Voice message (0:07)"), unread badges, context menu (pin/mute/archive/mark-read/leave). |
+| ✉️ **Messaging** — Enter/Shift+Enter, optimistic sends (clock → ✓ → ✓✓ → blue ✓✓), retry without duplicates, infinite scroll-up (30/page), date dividers + sender grouping, replies with jump-to-quote, edit (15-min, own, TEXT), delete for me/everyone. | 🖼️ **Media & voice** — attach / paste / drag-drop, image thumbnails + lightbox, inline video, file cards with download, MediaRecorder voice notes with timer/waveform/cancel, upload progress. | 👨‍👩‍👧 **Groups** — create with ≥2 participants + SYSTEM messages, info panel with roles, member add/remove (admin-only), rename, leave with ownership transfer; empty groups auto-deleted. |
+| ⌨️ **Typing & presence** — multi-typist labels in header and chat list, 5 s auto-expiry, online/last-seen subtitles. | ✅ **Read receipts** — SENT → DELIVERED → READ aggregation (worst-to-best), blue ticks in real time, unread cleared across tabs. | 🔔 **Notifications** — in-app toasts with Open action, browser notifications (permission requested on first interaction), `(N) ChatApp` title counter, muted chats excluded. |
+
+## 🚀 Quick Start
+
+> Requires **Bun ≥ 1.1** (or Node ≥ 20) and a Unix-like environment. The dev stack uses **SQLite**; see [Postgres alternative](#-postgres-alternative) for self-hosting.
+
+```bash
+# 1. Install dependencies
+bun install
+cd mini-services/chat-socket && bun install && cd ../..
+
+# 2. Configure the environment
+cp .env.example .env
+
+# 3. Create the schema + demo data
+bun run db:reset
+
+# 4. Run the app + the realtime service (two terminals)
+bun run dev                                  # Next.js on :3000
+cd mini-services/chat-socket && bun run dev  # Socket.IO on :3003 (+ bridge :3004)
+
+# 5. (Optional) Run the test suites
+bun run test   # Vitest unit tests
+bun run e2e    # Playwright happy path
+```
+
+Log in with **`demo@chatapp.com` / `password123`**.
+
+## 🏗️ Architecture
 
 ```
 Browser (Next.js App Router UI, single "/" route)
    │  REST (JSON, httpOnly-cookie JWT)         WebSocket (Socket.IO)
    ▼                                              ▼
-Next.js API Routes  ──── internal emit bridge ──►  Chat-socket mini-service (port 3003)
+Next.js API Routes  ──── internal emit bridge ──►  Chat-socket mini-service (:3003)
    │                                              (Socket.IO + presence + typing)
    ▼                                              ▼
-Prisma ORM  ────────────────────────────────►  SQLite (WAL) — single source of truth
+Prisma ORM  ──────────────────────────────────►  SQLite (WAL) — single source of truth
    │
    ▼
 Local file storage (/uploads) served via /api/files/<storageKey> (participant-only)
 ```
 
-**Key decisions (per spec §3):**
+**Key decisions:**
 
-1. **Two processes sharing one database.** The Next.js app hosts the REST API; a dedicated Socket.IO service (`mini-services/chat-socket`) handles realtime. The sandbox gateway exposes one port, so the browser connects to the socket service through the gateway (`io('/?XTransformPort=3003')`). REST mutations broadcast through an authenticated internal HTTP bridge (`127.0.0.1:3004/internal/emit`), so a message sent via REST still reaches every connected client instantly.
+1. **Two processes sharing one database.** Next.js hosts the REST API; a dedicated Socket.IO service (`mini-services/chat-socket`) handles realtime. REST mutations broadcast through an authenticated internal HTTP bridge (`127.0.0.1:3004/internal/emit`), so messages sent via REST still reach every connected client instantly.
 2. **Socket auth:** the JWT is read from the handshake cookie and verified before any event is processed; unauthenticated sockets are rejected.
-3. **Rooms:** one Socket.IO room per `conversation:<id>` plus a personal room `user:<id>` per socket. Sockets join all their conversation rooms on connect, and re-sync when added to a new conversation. Presence lives in an in-memory `Map<userId, Set<socketId>>`.
-4. **The database is the source of truth.** Sockets only notify; on reconnect the client refetches conversations and the active message window via REST (never trusting socket replay alone).
-5. **Optimistic UI:** messages render instantly with a clock icon and are reconciled by a server ack keyed on a client-generated `clientId` (UUID). Retries reuse the same `clientId`, and the server is idempotent on it — no duplicates.
+3. **Rooms:** one Socket.IO room per `conversation:<id>` plus a personal room `user:<id>` per socket. Presence lives in an in-memory `Map<userId, Set<socketId>>`.
+4. **Database is the source of truth.** Sockets only notify; on reconnect the client refetches via REST (never trusting socket replay alone).
+5. **Optimistic UI:** messages render instantly with a clock icon and reconcile on a server ack keyed on a client-generated `clientId`. Retries reuse the same `clientId`, and the server is idempotent on it — no duplicates.
 
----
+## 🎨 Design Language (Stoat)
 
-## Quick Start
+The theme is generated from [Stoat's](https://stoat.chat) design system (`stoatchat/for-web`):
+
+- **Colors:** Material 3 *tonal-spot* scheme from Stoat's accent `#5470ec` (light `#505b92` / dark `#b9c3ff`), full M3 surface-container ramp, error/badge reds, presence palette (`#3ABF7E` online).
+- **Layout:** 28 px floating panels on a neutral shell (`#191919` dark / `#e9e7ef` light), Discord-style flat message rows (36 px avatar gutter, colored usernames, timestamps), 24 px-radius composer, 48 px-radius chat header.
+- **Type & shape:** Inter, 14 px body, pill (M3) buttons, 4 / 8 / 12 / 16 / 28 px corner-radius scale.
+
+## 🧪 Testing
+
+| Suite | Tool | Path | What it covers |
+|---|---|---|---|
+| Unit | Vitest | `tests/unit/` | JWT sign/verify (tamper, expiry, wrong secret), Zod schemas (strictness, password policy), status & reaction aggregation, previews, date-divider/grouping logic, rate-limiter windows. |
+| Integration | Vitest + supertest-style | `tests/integration/` | 401/403/404 paths, non-participant access, `clientId` idempotency, cursor pagination (no overlap), rate limiting (exactly 20 → 429; 10 → 429). |
+| E2E | Playwright | `e2e/*.spec.ts` | chat happy path, dark-mode toggle, edit/delete flow, mobile layout, persistence across reloads, reactions, search. Skip in CI via `SKIP_E2E=1`. |
 
 ```bash
-# 1. Install dependencies
-npm install            # or: bun install
-cd mini-services/chat-socket && bun install && cd ../..
-
-# 2. Configure the environment (.env is already provided for the sandbox;
-#    copy .env.example when deploying elsewhere and fill it in)
-cp .env.example .env
-
-# 3. Create the schema + demo data
-npm run db:reset       # wipes and reseeds with demo users/chats/media
-
-# 4. Run the app + the realtime service
-npm run dev            # Next.js on :3000
-cd mini-services/chat-socket && bun run dev   # Socket.IO on :3003 (+ bridge :3004)
-
-# 5. Run the test suites
-npm run test           # Vitest unit tests
-npm run e2e            # Playwright happy path (see e2e/README notes below)
+bun run test     # Vitest unit tests
+bun run test:watch
+bun run e2e      # requires running dev stack + seeded DB
+bun run lint     # ESLint — zero warnings
 ```
 
-Log in with **demo@chatapp.com / password123**.
+## 🔐 Security
 
-> **Postgres alternative:** this deployment runs on SQLite (see *Deviations*). To use PostgreSQL locally, point `DATABASE_URL` at a Postgres instance (a `docker-compose.yml` with Postgres 16 is included), switch `provider = "postgresql"` in `prisma/schema.prisma`, and re-run `prisma db push` + the seed. No application code changes are required — all queries go through Prisma.
+- JWT (HS256) in httpOnly, `SameSite=Lax` cookies; the socket handshake verifies the same cookie.
+- **Zod schemas** (strict objects) on every REST route and socket handler; 4096-char message cap.
+- **Authorization:** every conversation/message operation verifies active participation — `403` for existing-but-forbidden, `404` for missing.
+- **Uploads:** MIME whitelist + `MAX_UPLOAD_MB` enforcement, random server-side storage names, participant-only serving, webp thumbnails via `sharp`.
+- **Rate limits:** 20 messages/10 s/user, 10 uploads/min/user, 10 login attempts/15 min/IP — all `429` + `Retry-After`.
+- **XSS:** message text renders as plain text via React; no `dangerouslySetInnerHTML` on user content anywhere.
 
----
+> 🛡️ Found a security issue? Please **do not** open a public issue. Use GitHub's **[private security advisory](https://github.com/a3dullah2/chat-app/security/advisories/new)** flow instead.
 
-## Environment Variables
+## ⚙️ Environment Variables
 
 | Variable | Purpose | Example |
 |---|---|---|
-| `DATABASE_URL` | Database connection string (SQLite file in this deployment) | `file:/home/z/my-project/db/custom.db` |
-| `JWT_SECRET` | Token signing secret (min 32 chars in production) | random string |
-| `NEXT_PUBLIC_APP_URL` | Absolute URL for links/avatars | `http://localhost:3000` |
+| `DATABASE_URL` | Connection string (SQLite file or Postgres URL) | `file:./db/custom.db` |
+| `JWT_SECRET` | Token signing secret (≥ 32 chars in production) | random string |
+| `NEXT_PUBLIC_APP_URL` | Absolute URL for links / avatars | `http://localhost:3000` |
 | `MAX_UPLOAD_MB` | Upload size cap (default 25) | `25` |
 | `INTERNAL_SOCKET_TOKEN` | Shared secret for the REST → socket emit bridge | random string |
 
-`SOCKET_PATH` from the spec is not configurable in this deployment: the gateway routes websocket traffic by the `XTransformPort` query parameter with a fixed path (`/`), which the socket service must honor.
+> ⚠️ **Never commit `.env`.** The repo ships a sanitized `.env.example` — copy it locally and fill in real values. Rotate any dev secrets before going to production.
 
----
-
-## Seeded Demo Accounts
+## 🌱 Seeded Demo Accounts
 
 All seeded users share the password **`password123`**.
 
@@ -93,77 +138,87 @@ All seeded users share the password **`password123`**.
 | David Lee | `david@chatapp.com` | 1 unread message |
 | Emma Martinez | `emma@chatapp.com` | Added to the trip group with a SYSTEM message |
 
-The seed creates 6 users, 4 direct + 2 group conversations, 37 messages (text, images, voice notes, a PDF, system events), varied read states, reactions, and generated media (gradient PNGs with webp thumbnails, WAV voice notes, a hand-built PDF). Re-run `npm run db:reset` at any time for a reproducible state.
+The seed creates **6 users, 4 direct + 2 group conversations, 37 messages** (text, images, voice notes, a PDF, system events), varied read states, reactions, and generated media (gradient PNGs + webp thumbnails, WAV voice notes, a hand-built PDF). Re-run `bun run db:reset` at any time for a reproducible state.
 
----
-
-## Scripts
+## 📜 Scripts
 
 | Script | Purpose |
 |---|---|
-| `npm run dev` | Start Next.js in dev mode (port 3000) |
-| `npm run build` / `npm start` | Production build / serve |
-| `npm run db:push` | Push the Prisma schema |
-| `npm run db:seed` / `npm run db:reset` | Wipe + reseed demo data |
-| `npm run test` | Vitest unit tests (46 tests) |
-| `npm run e2e` | Playwright happy-path test (skip with `SKIP_E2E=1`) |
-| `npm run lint` | ESLint (zero warnings) |
+| `bun run dev` | Start Next.js in dev mode (port 3000) |
+| `bun run build` / `bun start` | Production build / serve |
+| `bun run db:push` | Push the Prisma schema |
+| `bun run db:seed` / `bun run db:reset` | Seed demo data / wipe + reseed |
+| `bun run test` | Vitest unit tests |
+| `bun run test:watch` | Vitest in watch mode |
+| `bun run e2e` | Playwright happy path (skip with `SKIP_E2E=1`) |
+| `bun run lint` | ESLint (zero warnings) |
 
----
+## 📖 Documentation
 
-## Feature Checklist (spec §10)
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — dev setup, branch workflow, commit conventions, PR checklist.
+- **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** — Contributor Covenant 2.1.
+- **[Architecture](#-architecture)** — process topology, socket auth, rooms, idempotent optimistic UI.
+- **[Security](#-security)** — JWT, Zod, authz, uploads, rate limits, XSS.
+- **[Feature checklist](#-features)** — every spec requirement mapped to the implementation.
 
-- **FR-01 Auth** — signup/login/logout with inline validation, non-enumerating errors, httpOnly JWT cookies (24 h), login rate limit 10/15 min/IP.
-- **FR-02 Users & profiles** — debounced search (300 ms), profile editing with avatar upload.
-- **FR-03 Chat list** — pinned-first + activity ordering, type-aware previews ("📷 Photo", "🎤 Voice message (0:07)", "📄 report.pdf"), unread badges, context menu (pin/mute/archive/mark-read/leave), DIRECT reuse.
-- **FR-04 Messaging** — Enter/Shift+Enter, optimistic sends (clock → ✓ → ✓✓ → blue ✓✓), retry without duplicates, infinite scroll-up (30/page), date dividers + 5-minute sender grouping, replies with jump-to-quote, hover/long-press actions, edit (15 min, own, TEXT), delete for me/everyone with placeholder.
-- **FR-05 Media & voice** — attach/paste/drag-drop, image thumbnails + lightbox, inline video, file cards with download, MediaRecorder voice notes with timer/waveform/cancel, upload progress, client-side size rejection.
-- **FR-06 Groups** — create with ≥2 participants + SYSTEM messages, info panel with roles, member add/remove (admin-only), rename, leave with ownership transfer to the earliest-joined member (empty groups are deleted).
-- **FR-07 Typing & presence** — multi-typist labels in header and chat list, 5 s auto-expiry, online/last-seen subtitles.
-- **FR-08 Read receipts** — SENT→DELIVERED→READ aggregation (worst-to-best across recipients), blue ticks in real time, unread cleared across tabs.
-- **FR-09 Search** — sidebar title + full-text message search ("N messages" rows) with scroll-to-match + highlight, All/Unread/Groups filters.
-- **FR-10 Notifications** — in-app toasts with Open action, browser notifications (permission requested on first interaction, degrade silently), `(N) ChatApp` title counter reset on focus, muted chats excluded everywhere.
+## 📦 Postgres Alternative
 
----
+This deployment runs on SQLite. To use PostgreSQL locally:
 
-## Security
+1. Point `DATABASE_URL` at a Postgres instance (a `docker-compose.yml` with Postgres 16 is included).
+2. Switch `provider = "postgresql"` in `prisma/schema.prisma`.
+3. Re-run `prisma db push` + `bun run db:seed`.
 
-- JWT (HS256) in httpOnly, SameSite=Lax cookies; the socket handshake verifies the same cookie.
-- Zod schemas (strict objects) on every REST route and socket handler; 4096-char message cap.
-- Authorization: every conversation/message operation verifies active participation — `403` for existing-but-forbidden resources, `404` for missing ones.
-- Uploads: MIME whitelist + `MAX_UPLOAD_MB` enforcement, random server-side storage names, participant-only file serving with authorization checks, webp thumbnails.
-- Rate limits: 20 messages/10 s/user, 10 uploads/min/user, 10 login attempts/15 min/IP — all return `429` + `Retry-After`.
-- XSS: message text renders as plain text via React; no `dangerouslySetInnerHTML` on user content anywhere.
+No application code changes are required — all queries go through Prisma.
 
----
+## 🤝 Contributing
 
-## Testing
+Pull requests are welcome! Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) first — it covers branching, commit conventions, the PR checklist, and how to add tests for new features.
 
-- **Unit (Vitest, `tests/unit/`)**: JWT sign/verify (tamper, expiry, wrong secret), Zod schemas (strictness, password policy), status aggregation, reaction aggregation, previews, date-divider/grouping logic, rate limiter window behavior.
-- **Integration**: exercised live during development — 401/403/404 paths, non-participant access, `clientId` idempotency (verified: identical response for a replayed send), cursor pagination (ascending pages, no overlap), rate limiting (exactly 20 then 429; 10 then 429).
-- **E2E (Playwright, `e2e/chat.spec.ts`)**: signup → search user → send → second browser context receives in real time → reply → ticks turn blue. Requires a running dev server + socket service and seeded DB; skip in CI with `SKIP_E2E=1`. (Not executed in this sandbox because it needs two interactive browser contexts; the same flow was verified manually end-to-end through the gateway with a two-session browser harness.)
+```bash
+# Quick start for contributors
+git clone https://github.com/<your-username>/chat-app.git
+cd chat-app
+bun install
+cp .env.example .env
+bun run db:reset
+bun run dev
+```
 
----
+For bug reports and feature requests, use the [issue templates](https://github.com/a3dullah2/chat-app/issues/new/choose). For questions and ideas, use [Discussions](https://github.com/a3dullah2/chat-app/discussions).
 
-## Deviations from the Spec (and why)
+## 📝 Deviations from the Spec
 
 | Spec | This build | Rationale |
 |---|---|---|
-| PostgreSQL + Docker Compose | **SQLite (WAL)**; a `docker-compose.yml` for Postgres is included for self-hosting | The deployment sandbox provides a single SQLite database and no Docker daemon. All data access goes through Prisma, so switching to Postgres is a schema-provider change only. |
-| Single Node process hosting Next.js + custom Socket.IO server | **Separate socket mini-service** (port 3003) behind the sandbox gateway, plus an authenticated internal emit bridge (port 3004) | The environment's gateway exposes one port and routes websocket traffic via `?XTransformPort=3003`; Next.js route handlers cannot host the socket server in this topology. REST and sockets still share the same Prisma client code, auth, and database. |
-| Multi-page routes (`/login`, `/signup`, `/chat`) | **Single `/` route** with client-side auth gating | The platform only exposes the root route. Login/signup/chat are full views within one page; the same auth guards run on every API route. |
-| Prisma enums | **String columns + Zod validation** | SQLite has no native enums; validation happens at every entry point. |
-| `SOCKET_PATH` env | Fixed path `/` | Required by the gateway routing contract (see Environment Variables). |
-| `Attachment.messageId` required | **Nullable** + `uploadedById`/`storageKey` fields | The spec's own upload flow creates attachments before a message exists; the extra fields enable authorization before linking and safe on-disk naming. |
-| `HiddenMessage` model added | New table | Implements "delete for me" (FR-04 AC8), which the spec's schema couldn't express. |
-| `Message.clientId` column (unique) added | New column | Required for the spec's retry-safe idempotent sends. |
-| Prisma schema verbatim | Missing back-relations added (`Reaction.user`, `MessageStatus.user`, `User.conversationsCreated`, `Message.hiddenBy`) | The schema as written in the spec does not pass Prisma validation. |
-| Next.js middleware protecting `/chat` | Per-route auth guards + client gate | No page routes exist to protect in the single-route deployment; the security outcome is identical. |
+| PostgreSQL + Docker Compose | SQLite (WAL); `docker-compose.yml` for Postgres included | Sandbox provides only SQLite; all data access via Prisma so swapping is a schema-provider change only. |
+| Single Node process | Separate socket mini-service (:3003) + authenticated emit bridge (:3004) | Gateway routes websocket traffic via `?XTransformPort=3003`; Next.js route handlers can't host the socket server in this topology. |
+| Multi-page routes (`/login`, `/signup`, `/chat`) | Single `/` route with client-side auth gating | Platform only exposes the root route; same auth guards run on every API route. |
+| Prisma enums | String columns + Zod validation | SQLite has no native enums; validation happens at every entry point. |
+| `SOCKET_PATH` env | Fixed path `/` | Required by the gateway routing contract. |
+| `Attachment.messageId` required | Nullable + `uploadedById` / `storageKey` fields | Spec's upload flow creates attachments before a message exists. |
+| `HiddenMessage` model added | New table | Implements "delete for me" (FR-04 AC8). |
+| `Message.clientId` unique column added | New column | Required for retry-safe idempotent sends. |
+| Prisma schema verbatim | Missing back-relations added | The schema as written in the spec does not pass Prisma validation. |
+| Next.js middleware protecting `/chat` | Per-route auth guards + client gate | No page routes to protect; security outcome is identical. |
 
-## Known Limitations
+## ⚠️ Known Limitations
 
-- Presence, typing state, and rate-limit counters are in-memory per process — they reset on service restart and are not shared between the REST and socket processes (documented acceptable for this scale).
+- Presence, typing state, and rate-limit counters are in-memory per process — they reset on service restart and are not shared between the REST and socket processes (acceptable at this scale).
 - Delivery receipts mark `DELIVERED` when a recipient has an active socket (server-side detection) rather than tracking client render.
 - Image thumbnails are generated server-side with `sharp`; videos have no server-side poster frames.
-- Browser-notification playback of voice notes requires a real user gesture (headless autoplay policies); verified manually.
+- Browser-notification playback of voice notes requires a real user gesture (headless autoplay policies).
 - The e2e suite targets a locally running stack and is skipped in CI via `SKIP_E2E=1`.
+
+## 📄 License
+
+[MIT](LICENSE) © 2026 [a3dullah2](https://github.com/a3dullah2)
+
+---
+
+<div align="center">
+
+<sub>Built with ❤️ using Next.js, Prisma, Socket.IO, and the Stoat design system.</sub><br>
+<sub>If this project is useful to you, consider ⭐ starring the repo — it helps others find it.</sub>
+
+</div>

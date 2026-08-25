@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Ask in Discussions
+    url: https://github.com/a3dullah2/chat-app/discussions
+    about: Have a question or want to discuss an idea before filing an issue? Use Discussions.
+  - name: 🔒 Report a security vulnerability
+    url: https://github.com/a3dullah2/chat-app/security/policy
+    about: Please do not file public issues for security reports. Use the private security advisory flow.
