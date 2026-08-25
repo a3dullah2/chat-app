@@ -1,12 +1,15 @@
 // POST /api/stickers/import-telegram
 // Body: { packLink: "https://t.me/addstickers/PackName" }
-// Response: { packId, name, stickerCount, skipped, skippedReason }
+// Response: { packId, name, stickerCount, skipped, skippedReason, alreadyImported }
 //
 // Imports a Telegram sticker pack into the user's personal library.
 // Idempotent: if the user already imported this pack (by telegramName),
-// returns the existing pack. Stickers > 500 KB are skipped with a reason.
-// Stickers in formats we don't support (current set: webp/png/gif/lottie+json/webm)
-// are skipped — currently all Telegram formats are supported.
+// returns the existing pack (and skips the rate-limit check — re-imports
+// of an already-imported pack are free).
+// Stickers > 500 KB are skipped with a reason. Stickers in formats we
+// don't support (current set: webp/png/gif/lottie+json/webm) are skipped
+// — currently all Telegram formats are supported.
+// Rate-limited: 30 NEW imports per 10 min per user.
 
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
@@ -43,20 +46,14 @@ export async function POST(request: Request): Promise<NextResponse> {
     return jsonError(422, firstIssue(parsed.error), "VALIDATION");
   }
 
-  // Rate limit: 5 imports per hour per user.
-  const rl = stickerImportLimiter.check(
-    `tg-import:${me.id}`,
-    STICKER_IMPORT_RATE_LIMIT.limit,
-    STICKER_IMPORT_RATE_LIMIT.windowMs,
-  );
-  if (!rl.allowed) return tooManyRequests(rl.retryAfterSec);
-
   const packName = parsePackName(parsed.data.packLink);
   if (!packName) {
     return jsonError(422, "Could not parse pack name from link", "VALIDATION");
   }
 
   // Idempotency: if the user already imported this pack, return it as-is.
+  // ⚠️ MUST happen BEFORE the rate-limit check, otherwise re-clicking
+  // "Import" on a pack that's already in your library burns your quota.
   const existing = await db.stickerPack.findFirst({
     where: { telegramName: packName, ownerId: me.id },
     include: { stickers: { orderBy: { sortOrder: "asc" } } },
@@ -72,6 +69,16 @@ export async function POST(request: Request): Promise<NextResponse> {
       alreadyImported: true,
     });
   }
+
+  // Rate limit: 30 NEW imports per 10 min per user. Placed AFTER idempotency
+  // so duplicate-clicking an already-imported pack is free, and BEFORE the
+  // expensive Telegram API calls so we don't get DoS'd by runaway loops.
+  const rl = stickerImportLimiter.check(
+    `tg-import:${me.id}`,
+    STICKER_IMPORT_RATE_LIMIT.limit,
+    STICKER_IMPORT_RATE_LIMIT.windowMs,
+  );
+  if (!rl.allowed) return tooManyRequests(rl.retryAfterSec);
 
   // Fetch the pack metadata.
   let packMeta;

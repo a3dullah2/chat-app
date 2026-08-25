@@ -48,8 +48,8 @@ export const TELEGRAM_PACK_LINK_RE = /^https?:\/\/(?:t\.me|telegram\.me)\/addsti
 /** Maximum stickers kept in a user's Recent list. New ones bump the oldest out. */
 export const MAX_RECENT_STICKERS = 24;
 
-/** Rate limit for Telegram pack imports: 5 per hour per user. */
-export const STICKER_IMPORT_RATE_LIMIT = { limit: 5, windowMs: 60 * 60 * 1000 } as const;
+/** Rate limit for Telegram pack imports: 30 per 10 min per user. */
+export const STICKER_IMPORT_RATE_LIMIT = { limit: 30, windowMs: 10 * 60 * 1000 } as const;
 
 export const MessageDeliveryStatus = {
   SENT: "SENT",

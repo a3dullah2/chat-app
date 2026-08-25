@@ -71,7 +71,11 @@ export async function GET(request: Request, { params }: Params): Promise<NextRes
   }
 
   // -------- Sticker path --------
-  const sticker = await db.sticker.findUnique({
+  // ⚠️ Sticker.storageKey is NOT unique (the same file CAN be shared by
+  // two packs after dedup, e.g. the same image imported twice). Use
+  // findFirst, NOT findUnique — findUnique throws PrismaClientValidationError
+  // on non-unique fields.
+  const sticker = await db.sticker.findFirst({
     where: { storageKey },
     include: { pack: { select: { id: true, ownerId: true } } },
   });
