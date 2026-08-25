@@ -32,6 +32,9 @@ model User {
   statuses         MessageStatus[]
   hiddenMessages   HiddenMessage[]
   conversationsCreated Conversation[]
+  stickerPacks     StickerPack[]
+  recentStickers   UserStickerRecent[]
+  favoriteStickers UserStickerFavorite[]
 }
 
 model Conversation {
@@ -74,12 +77,13 @@ model Message {
   clientId       String?   @unique // idempotent sends / retries
   conversationId String
   senderId       String
-  type           String    @default("TEXT") // TEXT | IMAGE | VIDEO | AUDIO | FILE | SYSTEM
+  type           String    @default("TEXT") // TEXT | IMAGE | VIDEO | AUDIO | FILE | SYSTEM | STICKER
   text           String?
   replyToId      String?
   editedAt       DateTime?
   deletedAt      DateTime?
   createdAt      DateTime  @default(now())
+  stickerId      String?  // populated when type = "STICKER"
 
   conversation Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender       User             @relation(fields: [senderId], references: [id])
@@ -89,8 +93,10 @@ model Message {
   reactions    Reaction[]
   statuses     MessageStatus[]
   hiddenBy     HiddenMessage[]
+  sticker      Sticker?         @relation(fields: [stickerId], references: [id])
 
   @@index([conversationId, createdAt])
+  @@index([stickerId])
 }
 
 model Attachment {
@@ -149,4 +155,71 @@ model HiddenMessage {
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([messageId, userId])
+}
+
+// ---------------------------------------------------------------------------
+// Stickers
+// ---------------------------------------------------------------------------
+
+model StickerPack {
+  id             String    @id @default(cuid())
+  slug           String    @unique
+  name           String
+  source         String    // "BUNDLED" | "TELEGRAM_IMPORT" | "USER_UPLOAD"
+  ownerId        String?   // null = global/bundled; userId = personal library
+  telegramName   String?   // unique Telegram pack name for dedup (e.g. "CatName")
+  coverStickerId String?   // first sticker id, shown in tab strip
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  owner    User?      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  stickers Sticker[]
+
+  @@index([ownerId])
+  @@index([source])
+}
+
+model Sticker {
+  id         String   @id @default(cuid())
+  packId     String
+  storageKey String   // "stickers/emojis/smile.webp" (bundled) or path under /uploads/stickers
+  mime       String   // "image/webp" | "image/gif" | "image/png" | "application/lottie+json"
+  width      Int      @default(256)
+  height     Int      @default(256)
+  emoji      String?  // optional Telegram-provided emoji
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  pack          StickerPack @relation(fields: [packId], references: [id], onDelete: Cascade)
+  recentUsers   UserStickerRecent[]
+  favoriteUsers UserStickerFavorite[]
+  messages      Message[]
+
+  @@index([packId])
+  @@unique([packId, sortOrder])
+}
+
+// Auto-populated on every sticker send; trimmed to last 24 per user.
+model UserStickerRecent {
+  userId     String
+  stickerId  String
+  lastUsedAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sticker Sticker @relation(fields: [stickerId], references: [id], onDelete: Cascade)
+
+  @@id([userId, stickerId])
+  @@index([userId, lastUsedAt])
+}
+
+// Manually starred stickers; visible in the picker's Favorites tab.
+model UserStickerFavorite {
+  userId    String
+  stickerId String
+  starredAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sticker Sticker @relation(fields: [stickerId], references: [id], onDelete: Cascade)
+
+  @@id([userId, stickerId])
 }

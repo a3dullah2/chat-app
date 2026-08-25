@@ -50,11 +50,36 @@ export interface MessageDTO {
   replyTo: ReplyPreviewDTO | null;
   attachments: AttachmentDTO[];
   reactions: ReactionGroupDTO[];
+  sticker: StickerDTO | null;
   /** Aggregated delivery status from the current user's (sender's) perspective. */
   status: MessageDeliveryStatus;
   editedAt: string | null;
   deletedAt: string | null;
   createdAt: string;
+}
+
+export interface StickerDTO {
+  id: string;
+  packId: string;
+  packName: string;
+  storageKey: string;
+  url: string;
+  mime: string;
+  width: number;
+  height: number;
+  emoji: string | null;
+}
+
+export interface StickerPackDTO {
+  id: string;
+  slug: string;
+  name: string;
+  source: string; // StickerSourceValue
+  ownerId: string | null;
+  coverStickerId: string | null;
+  stickerCount: number;
+  createdAt: string;
+  stickers: StickerDTO[];
 }
 
 export interface ParticipantDTO {
@@ -112,6 +137,7 @@ export interface SendMessageInput {
   text?: string | null;
   replyToId?: string | null;
   attachmentId?: string | null;
+  stickerId?: string | null;
 }
 
 /** Error shape returned by every REST endpoint (spec §8). */

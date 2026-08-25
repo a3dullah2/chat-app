@@ -127,6 +127,10 @@ async function main() {
   await db.message.deleteMany();
   await db.participant.deleteMany();
   await db.conversation.deleteMany();
+  await db.userStickerFavorite.deleteMany();
+  await db.userStickerRecent.deleteMany();
+  await db.sticker.deleteMany();
+  await db.stickerPack.deleteMany();
   await db.user.deleteMany();
 
   const passwordHash = await bcrypt.hash("password123", 10);
@@ -453,13 +457,98 @@ async function main() {
     });
   }
 
-  const [userCount, messageCount] = await Promise.all([
+  // -----------------------------------------------------------------
+  // Bundled sticker packs (emojis, cats, hearts) — 26 stickers total.
+  // -----------------------------------------------------------------
+  interface BundledStickerSpec { name: string; emoji: string; }
+  interface BundledPackSpec { slug: string; name: string; stickers: BundledStickerSpec[]; }
+
+  const BUNDLED_PACKS: BundledPackSpec[] = [
+    {
+      slug: "emojis",
+      name: "Emojis",
+      stickers: [
+        { name: "happy", emoji: "😀" },
+        { name: "laugh", emoji: "😂" },
+        { name: "heart_eyes", emoji: "😍" },
+        { name: "cool", emoji: "😎" },
+        { name: "think", emoji: "🤔" },
+        { name: "cry", emoji: "😭" },
+        { name: "angry", emoji: "😡" },
+        { name: "sleep", emoji: "😴" },
+        { name: "mind_blown", emoji: "🤯" },
+        { name: "party", emoji: "🥳" },
+        { name: "eyes", emoji: "👀" },
+        { name: "pray", emoji: "🙏" },
+      ],
+    },
+    {
+      slug: "cats",
+      name: "Cats",
+      stickers: [
+        { name: "happy_cat", emoji: "😺" },
+        { name: "grumpy_cat", emoji: "😾" },
+        { name: "love_cat", emoji: "😻" },
+        { name: "sleepy_cat", emoji: "😴" },
+        { name: "wink_cat", emoji: "😼" },
+        { name: "shocked_cat", emoji: "🙀" },
+        { name: "sad_cat", emoji: "😿" },
+        { name: "nerd_cat", emoji: "🤓" },
+      ],
+    },
+    {
+      slug: "hearts",
+      name: "Hearts",
+      stickers: [
+        { name: "red_heart", emoji: "❤️" },
+        { name: "pink_heart", emoji: "💕" },
+        { name: "purple_heart", emoji: "💜" },
+        { name: "blue_heart", emoji: "💙" },
+        { name: "green_heart", emoji: "💚" },
+        { name: "broken_heart", emoji: "💔" },
+      ],
+    },
+  ];
+
+  let stickerCount = 0;
+  for (const pack of BUNDLED_PACKS) {
+    const stickers = pack.stickers.map((s, i) => ({
+      storageKey: `stickers/${pack.slug}/${s.name}.webp`,
+      mime: "image/webp",
+      width: 256,
+      height: 256,
+      emoji: s.emoji,
+      sortOrder: i,
+    }));
+    const created = await db.stickerPack.create({
+      data: {
+        slug: pack.slug,
+        name: pack.name,
+        source: "BUNDLED",
+        ownerId: null,
+        stickers: { create: stickers },
+      },
+      include: { stickers: { select: { id: true, sortOrder: true } } },
+    });
+    const cover = created.stickers.find((s) => s.sortOrder === 0) ?? created.stickers[0];
+    if (cover) {
+      await db.stickerPack.update({
+        where: { id: created.id },
+        data: { coverStickerId: cover.id },
+      });
+    }
+    stickerCount += created.stickers.length;
+  }
+
+  const [userCount, messageCount, packCount] = await Promise.all([
     db.user.count(),
     db.message.count(),
+    db.stickerPack.count(),
   ]);
   console.log(`   conversations: 6 (4 direct + 2 groups incl. demo user)`);
   console.log(`   messages: ${messageCount} (text, image, voice, file, system)`);
   console.log(`   users: ${userCount}`);
+  console.log(`   sticker packs: ${packCount} (bundled, ${stickerCount} stickers)`);
   console.log("✅ Seed complete. Log in with demo@chatapp.com / password123");
 }
 

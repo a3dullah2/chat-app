@@ -5,6 +5,7 @@ import {
   DEFAULT_MESSAGE_PAGE_SIZE,
   MAX_MESSAGE_PAGE_SIZE,
   EDIT_WINDOW_MS,
+  MAX_RECENT_STICKERS,
   MessageDeliveryStatus,
   MessageType,
 } from "./constants";
@@ -89,11 +90,30 @@ export async function sendMessage(
 
   const text = input.text != null ? input.text : null;
   let attachment: Attachment | null = null;
+  let stickerId: string | null = null;
 
   if (input.type === MessageType.TEXT) {
     if (!text || text.trim().length === 0) {
       return err(422, "VALIDATION", "Message text is required");
     }
+  } else if (input.type === MessageType.STICKER) {
+    // Sticker messages: validate the stickerId and that the sender can use it.
+    // A sticker is accessible to the sender if the pack is BUNDLED (ownerId is
+    // null) OR the pack is owned by this user (USER_UPLOAD / TELEGRAM_IMPORT).
+    if (!input.stickerId) {
+      return err(422, "VALIDATION", "stickerId is required for sticker messages");
+    }
+    const sticker = await db.sticker.findUnique({
+      where: { id: input.stickerId },
+      include: { pack: { select: { id: true, ownerId: true, source: true } } },
+    });
+    if (!sticker) return err(404, "NOT_FOUND", "Sticker not found");
+    const isOwner = sticker.pack.ownerId === senderId;
+    const isBundled = sticker.pack.ownerId === null;
+    if (!isOwner && !isBundled) {
+      return err(403, "FORBIDDEN", "You do not have access to this sticker");
+    }
+    stickerId = sticker.id;
   } else {
     if (!input.attachmentId) {
       return err(422, "VALIDATION", "attachmentId is required for media messages");
@@ -121,6 +141,7 @@ export async function sendMessage(
       type: input.type,
       text,
       replyToId: input.replyToId ?? null,
+      stickerId,
       attachments: input.attachmentId ? { connect: { id: input.attachmentId } } : undefined,
       statuses: {
         create: otherParticipants.map((p) => ({ userId: p.userId, status: "SENT" })),
@@ -133,6 +154,29 @@ export async function sendMessage(
     where: { id: input.conversationId },
     data: { updatedAt: new Date() },
   });
+
+  // For STICKER messages: maintain the per-user Recent list (capped at 24).
+  if (stickerId) {
+    await db.userStickerRecent.upsert({
+      where: { userId_stickerId: { userId: senderId, stickerId } },
+      create: { userId: senderId, stickerId },
+      update: { lastUsedAt: new Date() },
+    });
+    const overflow = await db.userStickerRecent.findMany({
+      where: { userId: senderId },
+      orderBy: { lastUsedAt: "desc" },
+      skip: MAX_RECENT_STICKERS,
+      select: { stickerId: true },
+    });
+    if (overflow.length > 0) {
+      await db.userStickerRecent.deleteMany({
+        where: {
+          userId: senderId,
+          stickerId: { in: overflow.map((o) => o.stickerId) },
+        },
+      });
+    }
+  }
 
   const message = await db.message.findUnique({
     where: { id: created.id },

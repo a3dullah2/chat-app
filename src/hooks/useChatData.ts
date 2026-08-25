@@ -58,6 +58,7 @@ export interface SendMessageArgs {
   text?: string | null;
   replyToId?: string | null;
   attachmentId?: string | null;
+  stickerId?: string | null;
   /** For optimistic rendering of media before the ack lands. */
   attachments?: MessageDTO["attachments"];
   replyTo?: MessageDTO | null;
@@ -91,6 +92,7 @@ export function useSendMessage(me: PublicUserDTO) {
           : null,
         attachments: args.attachments ?? [],
         reactions: [],
+        sticker: null,
         status: null,
         editedAt: null,
         deletedAt: null,
@@ -107,6 +109,7 @@ export function useSendMessage(me: PublicUserDTO) {
         text: args.text ?? null,
         replyToId: args.replyToId ?? null,
         attachmentId: args.attachmentId ?? null,
+        stickerId: args.stickerId ?? null,
       };
 
       let message: MessageDTO | null = null;

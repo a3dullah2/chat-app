@@ -20,8 +20,36 @@ export const MessageType = {
   AUDIO: "AUDIO",
   FILE: "FILE",
   SYSTEM: "SYSTEM",
+  STICKER: "STICKER",
 } as const;
 export type MessageTypeValue = (typeof MessageType)[keyof typeof MessageType];
+
+export const StickerSource = {
+  BUNDLED: "BUNDLED",
+  TELEGRAM_IMPORT: "TELEGRAM_IMPORT",
+  USER_UPLOAD: "USER_UPLOAD",
+} as const;
+export type StickerSourceValue = (typeof StickerSource)[keyof typeof StickerSource];
+
+/** MIME types supported for stickers. Lottie is stored as decompressed JSON. */
+export const STICKER_MIME_TYPES: ReadonlySet<string> = new Set([
+  "image/webp",
+  "image/png",
+  "image/gif",
+  "application/lottie+json",
+]);
+
+/** Hard cap on sticker file size (bytes). Telegram imports skip oversized files. */
+export const MAX_STICKER_SIZE_BYTES = 512 * 1024; // 500 KB
+
+/** Telegram pack link parser — accepts t.me/addstickers/<name> and telegram.me/addstickers/<name>. */
+export const TELEGRAM_PACK_LINK_RE = /^https?:\/\/(?:t\.me|telegram\.me)\/addstickers\/([A-Za-z0-9_]+)$/;
+
+/** Maximum stickers kept in a user's Recent list. New ones bump the oldest out. */
+export const MAX_RECENT_STICKERS = 24;
+
+/** Rate limit for Telegram pack imports: 5 per hour per user. */
+export const STICKER_IMPORT_RATE_LIMIT = { limit: 5, windowMs: 60 * 60 * 1000 } as const;
 
 export const MessageDeliveryStatus = {
   SENT: "SENT",

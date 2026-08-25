@@ -34,7 +34,7 @@ export const updateProfileSchema = z.strictObject({
   avatarUrl: z.string().max(500).nullable().optional(),
 });
 
-export const messageTypes = ["TEXT", "IMAGE", "VIDEO", "AUDIO", "FILE"] as const;
+export const messageTypes = ["TEXT", "IMAGE", "VIDEO", "AUDIO", "FILE", "STICKER"] as const;
 
 export const sendMessageSchema = z.strictObject({
   clientId: z.string().min(8).max(64),
@@ -43,6 +43,25 @@ export const sendMessageSchema = z.strictObject({
   text: z.string().max(MAX_TEXT_LENGTH).nullable().optional(),
   replyToId: z.string().min(1).nullable().optional(),
   attachmentId: z.string().min(1).nullable().optional(),
+  stickerId: z.string().min(1).nullable().optional(),
+});
+
+export const telegramImportSchema = z.strictObject({
+  packLink: z
+    .string()
+    .trim()
+    .min(1, "Pack link is required")
+    .max(200, "Pack link is too long")
+    .regex(
+      /^https?:\/\/(?:t\.me|telegram\.me)\/addstickers\/[A-Za-z0-9_]+$/,
+      "Enter a valid Telegram sticker link (e.g. https://t.me/addstickers/PackName)",
+    ),
+});
+
+export const stickerUploadSchema = z.strictObject({
+  // file is validated separately in the route handler (multipart upload).
+  name: z.string().trim().min(1, "Sticker name is required").max(60).optional(),
+  emoji: z.string().min(1).max(16).optional(),
 });
 
 export const editMessageSchema = z.strictObject({

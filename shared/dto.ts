@@ -9,6 +9,7 @@ import type {
   MessageDeliveryStatus,
   PublicUserDTO,
   ReactionGroupDTO,
+  StickerDTO,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -21,6 +22,7 @@ export const messageInclude = {
   reactions: { include: { user: { select: { id: true, name: true } } } },
   statuses: true,
   replyTo: { include: { sender: { select: { id: true, name: true } }, attachments: true } },
+  sticker: { include: { pack: { select: { id: true, name: true } } } },
 } satisfies Prisma.MessageInclude;
 
 export type MessageFull = Prisma.MessageGetPayload<{ include: typeof messageInclude }>;
@@ -98,6 +100,7 @@ export function messagePreview(
   text: string | null,
   attachments: { fileName: string; durationSec: number | null; mimeType?: string }[],
   deleted: boolean,
+  stickerEmoji?: string | null,
 ): string {
   if (deleted) return "🚫 Message deleted";
   switch (type) {
@@ -109,6 +112,8 @@ export function messagePreview(
       return `🎤 Voice message (${formatDuration(attachments[0]?.durationSec ?? 0)})`;
     case "FILE":
       return `📄 ${truncate(attachments[0]?.fileName ?? "File", 42)}`;
+    case "STICKER":
+      return stickerEmoji ? `${stickerEmoji} Sticker` : "🏷️ Sticker";
     case "SYSTEM":
       return text ?? "";
     default:
@@ -171,6 +176,40 @@ export function toAttachmentDTO(a: {
   };
 }
 
+/**
+ * Maps a Sticker row + the absolute URL prefix into the client-side StickerDTO.
+ * Bundled stickers live in /public/stickers/... and are served at /stickers/...;
+ * uploaded and Telegram-imported stickers live under /uploads and are served
+ * via /api/files/... (participant-only auth in production, auth-scoped by user
+ * for personal library stickers).
+ */
+export function toStickerDTO(
+  s: {
+    id: string;
+    packId: string;
+    storageKey: string;
+    mime: string;
+    width: number;
+    height: number;
+    emoji: string | null;
+    pack?: { id: string; name: string } | null;
+  },
+  packNameFallback?: string,
+): StickerDTO {
+  const isBundled = s.storageKey.startsWith("stickers/");
+  return {
+    id: s.id,
+    packId: s.packId,
+    packName: s.pack?.name ?? packNameFallback ?? "",
+    storageKey: s.storageKey,
+    url: isBundled ? `/${s.storageKey}` : `/api/files/${s.storageKey}`,
+    mime: s.mime,
+    width: s.width,
+    height: s.height,
+    emoji: s.emoji,
+  };
+}
+
 export function toMessageDTO(m: MessageFull, viewerId: string): MessageDTO {
   const deleted = m.deletedAt !== null;
   const replyTo = m.replyTo
@@ -199,6 +238,7 @@ export function toMessageDTO(m: MessageFull, viewerId: string): MessageDTO {
     replyTo,
     attachments: m.attachments.map(toAttachmentDTO),
     reactions: aggregateReactions(m.reactions, viewerId),
+    sticker: m.sticker ? toStickerDTO(m.sticker) : null,
     status: aggregateStatuses(m.statuses, m.senderId, viewerId),
     editedAt: m.editedAt?.toISOString() ?? null,
     deletedAt: m.deletedAt?.toISOString() ?? null,
