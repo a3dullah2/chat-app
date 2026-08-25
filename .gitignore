@@ -58,6 +58,11 @@ uploads/
 # IM-conversation pasted images (user-provided screenshots; not source)
 /upload/pasted_image_*
 
+# Debug/deliverable screenshots — keep only the Stoat redesign docs
+# (stoat-*.png + README.md) as proper repo documentation.
+/download/debug-*.png
+/download/sticker-*.png
+
 # Database files (SQLite + Prisma local data - may contain user PII)
 db/*.db
 db/*.db-shm
