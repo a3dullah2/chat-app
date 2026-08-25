@@ -55,6 +55,9 @@ server.log
 # Runtime uploads
 uploads/
 
+# IM-conversation pasted images (user-provided screenshots; not source)
+/upload/pasted_image_*
+
 # Database files (SQLite + Prisma local data - may contain user PII)
 db/*.db
 db/*.db-shm
