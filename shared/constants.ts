@@ -45,6 +45,24 @@ export const MAX_STICKER_SIZE_BYTES = 512 * 1024; // 500 KB
 /** Telegram pack link parser — accepts t.me/addstickers/<name> and telegram.me/addstickers/<name>. */
 export const TELEGRAM_PACK_LINK_RE = /^https?:\/\/(?:t\.me|telegram\.me)\/addstickers\/([A-Za-z0-9_]+)$/;
 
+/**
+ * Telegram bot token format: numeric bot id, colon, then 30–40 chars of
+ * ASCII alphanumeric / underscore / hyphen (the secret hash).
+ * Example: 8886427178:AAHWbCmQZ5vv_MBUouAMq1J2LBJYoTWPCc0
+ *
+ * Used to validate user-pasted tokens in the in-app Sticker Settings UI
+ * before they're sent to the import-telegram API route.
+ */
+export const TELEGRAM_BOT_TOKEN_RE = /^\d{6,12}:[A-Za-z0-9_-]{30,40}$/;
+
+/**
+ * localStorage key under which the client stores the per-user Telegram bot
+ * token (entered in the Sticker Picker → "Add Telegram pack" → token settings).
+ * Per-device, never sent to the server except in the body of the import
+ * request — the server does not persist it.
+ */
+export const TELEGRAM_BOT_TOKEN_STORAGE_KEY = "chat.telegramBotToken";
+
 /** Maximum stickers kept in a user's Recent list. New ones bump the oldest out. */
 export const MAX_RECENT_STICKERS = 24;
 

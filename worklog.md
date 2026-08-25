@@ -189,3 +189,50 @@ Stage Summary:
 - Demo data: 3 real Telegram packs imported (Animals×50, bongo_cat×2, Peach×1) and 1 personal upload (wink_cat.webp) as a demonstration. User can manage these via the picker UI.
 - Screenshots in download/ for user reference.
 - SECURITY: TELEGRAM_BOT_TOKEN is in .env (gitignored). User should regenerate this token via @BotFather (/revoke) since it was shared in plaintext in the IM conversation.
+
+---
+Task ID: 7
+Agent: Super Z (main agent)
+Task: User requested two changes — (a) let each user add their own Telegram bot token inside the app (sticker settings) instead of relying on the env file, so anyone can paste their token and import packs; (b) fix the sticker picker tab strip that loads on an edge and gets cut off.
+
+Work Log:
+- Read the relevant surfaces: `src/components/chat/StickerPicker.tsx` (TelegramImportModal + tab strip), `src/app/api/stickers/import-telegram/route.ts`, `src/lib/stickers/telegram.ts` (token-from-env), `shared/validation.ts` (telegramImportSchema), `shared/constants.ts`, `tests/unit/stickers.test.ts`.
+- Verified that the previous session's bug fixes (TDZ fix in MessageBubble, findUnique→findFirst in /api/files route, StickerImage dispatch for Lottie, idempotency-before-rate-limit reorder, raised rate limit to 30/10min) are all in place and committed.
+- Confirmed the working tree was clean before starting (last commit `9a2cb96`).
+
+Implementation:
+1. **shared/constants.ts** — added two exports:
+   - `TELEGRAM_BOT_TOKEN_RE` = `/^\d{6,12}:[A-Za-z0-9_-]{30,40}$/` (Telegram bot tokens are <bot_id>:<hash>, 6-12 digit id + 30-40 char Base64URL hash).
+   - `TELEGRAM_BOT_TOKEN_STORAGE_KEY` = `"chat.telegramBotToken"` (localStorage key, per-device).
+2. **shared/validation.ts** — extended `telegramImportSchema` with an optional `botToken` field that must match `TELEGRAM_BOT_TOKEN_RE`. Empty string fails the regex (must be valid OR omitted). Backward compat preserved: requests without `botToken` still validate.
+3. **src/lib/stickers/telegram.ts** — replaced `requireBotToken()` (env-only) with `resolveToken(provided?)` that prefers a caller-provided token, then falls back to `process.env.TELEGRAM_BOT_TOKEN`, then throws `TelegramImportError("TOKEN_MISSING")` with a friendly message pointing the user to the in-app UI. Threaded the optional `botToken` param through `getStickerSet`, `getFile`, and `downloadFile`. Updated the file's JSDoc to reflect the new token resolution flow.
+4. **src/app/api/stickers/import-telegram/route.ts** — reads `parsed.data.botToken` (validated by the schema) and passes it through to `getStickerSet` and `downloadFile`. Added a top-of-file comment documenting token resolution: caller-provided → env fallback → 0 persistence.
+5. **src/components/chat/StickerPicker.tsx** — major addition:
+   - Added `useTelegramBotToken()` hook backed by `useSyncExternalStore` so the token is read from localStorage WITHOUT triggering the `react-hooks/set-state-in-effect` lint rule (which fires for `setState(localStorage.getItem())` in an effect). Server snapshot is `null`, client snapshot reads localStorage. Cross-tab `storage` events + a custom `chat:telegram-bot-token-change` event (dispatched on same-tab writes since `storage` only fires for OTHER tabs) keep the value fresh.
+   - Same pattern for a `hydrated` flag (server → `false`, client → `true`) so the picker can render a tiny skeleton instead of flashing the "no token" UI for one frame.
+   - Refactored `TelegramImportModal` into a 3-state funnel: (i) no token yet → "Add your Telegram bot token" CTA, (ii) token-setup form (password input with show/hide toggle, @BotFather link, /newbot hint, format validation, Save/Remove actions, Back button to return to pack-link form), (iii) token saved → pack-link input + a "Token saved — <masked>" chip with an "Edit" button so users can update or replace the token without re-doing the whole flow.
+   - `maskToken()` keeps the bot id visible (it's not secret) and masks everything but the last 4 chars of the hash.
+   - The import POST now includes `botToken: token ?? undefined` in the body.
+   - **Tab strip fix**: changed `px-1` → `pl-1.5 pr-3`, added `[scroll-padding-left:6px] [scroll-padding-right:12px]`, added a `useEffect` that calls `tab.scrollIntoView({ behavior: "auto", block: "nearest", inline: "nearest" })` whenever `activeTab` or `packs` change — so when the picker loads with an active tab that landed just past the right edge (the user's "loads on an edge and gets cut off" bug), it auto-scrolls fully into view.
+6. **tests/unit/stickers.test.ts** — added 19 new tests:
+   - `TELEGRAM_BOT_TOKEN_RE` accepts 4 valid tokens (canonical, 6-digit id min, 32-char hash min, 12-digit id + 40-char hash max) and rejects 9 invalid ones (no colon, missing bot id, hash too short, spaces in hash, hash too long, non-numeric bot id, bot id too short, empty string, plain text).
+   - `telegramImportSchema — botToken field`: accepts pack link without botToken (env fallback), accepts with valid botToken, trims whitespace, rejects malformed with friendly message, rejects empty-string botToken, exposes the storage key constant.
+
+Verification:
+- `bun run lint` clean (0 warnings, 0 errors) — verified after fixing an initial `react-hooks/set-state-in-effect` violation by switching the hook from `useState + useEffect(setToken)` to `useSyncExternalStore`.
+- `bun run test` — 285/285 passing (up from 266; 19 new tests for botToken validation; no regressions in the existing 266).
+- `bunx tsc --noEmit` — no new errors in any file I touched (the two `StickerPicker.tsx` errors that show up are pre-existing on `lottie-react`'s default export and were there before my changes; line numbers shifted only because I added imports).
+- `bun run dev` — server boots cleanly, home page compiles + renders 200, /api/auth/me and /api/conversations routes respond 200 with correct Prisma queries. No runtime errors.
+
+Stage Summary:
+- Deliverables:
+  - In-app Telegram bot token setup UI (Sticker Picker → "Add Telegram pack" → token form, with mask + show/hide + edit + remove). Token stored per-browser in localStorage under `chat.telegramBotToken`; never persisted server-side; sent in body of POST /api/stickers/import-telegram. Self-hosted setups that pre-configured `TELEGRAM_BOT_TOKEN` env var keep working — env is the fallback.
+  - Sticker tab strip edge-cutoff fixed via trailing padding + scroll-padding + auto-`scrollIntoView` on the active tab.
+- Files changed:
+  - `shared/constants.ts` (+15 lines)
+  - `shared/validation.ts` (+13 lines)
+  - `src/lib/stickers/telegram.ts` (~30 lines modified — token-resolution refactor)
+  - `src/app/api/stickers/import-telegram/route.ts` (~10 lines — thread token through)
+  - `src/components/chat/StickerPicker.tsx` (~330 lines — new hook + modal redesign + tab strip fix)
+  - `tests/unit/stickers.test.ts` (+95 lines — 19 new tests)
+- No security regressions: token is validated by Zod on the server, never logged, never returned in the response, never persisted. The bot id is shown in the masked chip (not secret); the hash is masked except the last 4 chars.

@@ -1,5 +1,5 @@
 // POST /api/stickers/import-telegram
-// Body: { packLink: "https://t.me/addstickers/PackName" }
+// Body: { packLink: "https://t.me/addstickers/PackName", botToken?: "<bot_id>:<hash>" }
 // Response: { packId, name, stickerCount, skipped, skippedReason, alreadyImported }
 //
 // Imports a Telegram sticker pack into the user's personal library.
@@ -10,6 +10,11 @@
 // don't support (current set: webp/png/gif/lottie+json/webm) are skipped
 // — currently all Telegram formats are supported.
 // Rate-limited: 30 NEW imports per 10 min per user.
+//
+// Token resolution: if the request body includes `botToken` (entered via the
+// Sticker Picker UI), it's used for the Telegram API calls. Otherwise the
+// route falls back to process.env.TELEGRAM_BOT_TOKEN for self-hosted setups.
+// The token is NEVER persisted or returned to the client.
 
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
@@ -50,6 +55,9 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (!packName) {
     return jsonError(422, "Could not parse pack name from link", "VALIDATION");
   }
+  // Per-request bot token from the in-app Sticker Picker UI (optional).
+  // If absent, the lib falls back to process.env.TELEGRAM_BOT_TOKEN.
+  const userBotToken = parsed.data.botToken ?? null;
 
   // Idempotency: if the user already imported this pack, return it as-is.
   // ⚠️ MUST happen BEFORE the rate-limit check, otherwise re-clicking
@@ -83,7 +91,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   // Fetch the pack metadata.
   let packMeta;
   try {
-    packMeta = await getStickerSet(packName);
+    packMeta = await getStickerSet(packName, userBotToken);
   } catch (err) {
     if (err instanceof TelegramImportError) {
       const status = err.code === "TG_NOT_FOUND" ? 422 : 502;
@@ -99,7 +107,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   let sortOrder = 0;
   for (const s of packMeta.stickers) {
     try {
-      const downloaded = await downloadFile(s.fileId);
+      const downloaded = await downloadFile(s.fileId, userBotToken);
       if (!SUPPORTED_EXTS.has(downloaded.ext)) {
         skipped += 1;
         skippedReason = `Skipped ${skipped} unsupported sticker${skipped === 1 ? "" : "s"} (format ${downloaded.ext} not supported)`;

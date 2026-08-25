@@ -6,6 +6,8 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import {
   TELEGRAM_PACK_LINK_RE,
+  TELEGRAM_BOT_TOKEN_RE,
+  TELEGRAM_BOT_TOKEN_STORAGE_KEY,
   MAX_RECENT_STICKERS,
   MAX_STICKER_SIZE_BYTES,
   STICKER_MIME_TYPES,
@@ -79,6 +81,99 @@ describe("telegramImportSchema", () => {
   it("rejects an empty packLink", () => {
     const parsed = telegramImportSchema.safeParse({ packLink: "" });
     expect(parsed.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Telegram bot token validation (in-app token setup)
+// ---------------------------------------------------------------------------
+
+describe("TELEGRAM_BOT_TOKEN_RE", () => {
+  const validTokens = [
+    "8886427178:AAHWbCmQZ5vv_MBUouAMq1J2LBJYoTWPCc0", // canonical form (10-digit id, 35-char hash)
+    "100000:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", // 6-digit id (minimum), 35-char hash
+    "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef", // 6-digit id, 32-char hash (minimum)
+    "123456789012:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij-_1", // 12-digit id (maximum), 40-char hash (maximum)
+  ];
+  for (const token of validTokens) {
+    it(`accepts ${token.slice(0, 8)}…`, () => {
+      expect(TELEGRAM_BOT_TOKEN_RE.test(token)).toBe(true);
+    });
+  }
+
+  const invalidTokens = [
+    "not-a-token",
+    "8886427178", // missing colon + hash
+    ":AAHWbCmQZ5vv_MBUouAMq1J2LBJYoTWPCc0", // missing bot id
+    "8886427178:short", // hash too short (< 30 chars)
+    "8886427178:with spaces in the hash value here 1234567890", // spaces not allowed
+    "8886427178:AAHWbCmQZ5vv_MBUouAMq1J2LBJYoTWPCc0toolong", // hash too long (> 40 chars)
+    "bot_id:AAHWbCmQZ5vv_MBUouAMq1J2LBJYoTWPCc0", // bot id must be numeric
+    "12345:AAHWbCmQZ5vv_MBUouAMq1J2LBJYoTWPCc0", // bot id too short (5 digits, minimum is 6)
+    "", // empty
+  ];
+  for (const token of invalidTokens) {
+    it(`rejects "${token.slice(0, 24)}"`, () => {
+      expect(TELEGRAM_BOT_TOKEN_RE.test(token)).toBe(false);
+    });
+  }
+});
+
+describe("telegramImportSchema — botToken field", () => {
+  it("accepts a canonical pack link without botToken (env fallback path)", () => {
+    const parsed = telegramImportSchema.safeParse({
+      packLink: "https://t.me/addstickers/CatName",
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.botToken).toBeUndefined();
+    }
+  });
+
+  it("accepts a canonical pack link with a valid botToken", () => {
+    const parsed = telegramImportSchema.safeParse({
+      packLink: "https://t.me/addstickers/CatName",
+      botToken: "8886427178:AAHWbCmQZ5vv_MBUouAMq1J2LBJYoTWPCc0",
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.botToken).toBe("8886427178:AAHWbCmQZ5vv_MBUouAMq1J2LBJYoTWPCc0");
+    }
+  });
+
+  it("trims whitespace around botToken before validation", () => {
+    const parsed = telegramImportSchema.safeParse({
+      packLink: "https://t.me/addstickers/CatName",
+      botToken: "  8886427178:AAHWbCmQZ5vv_MBUouAMq1J2LBJYoTWPCc0  ",
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.botToken).toBe("8886427178:AAHWbCmQZ5vv_MBUouAMq1J2LBJYoTWPCc0");
+    }
+  });
+
+  it("rejects a malformed botToken with a friendly message", () => {
+    const parsed = telegramImportSchema.safeParse({
+      packLink: "https://t.me/addstickers/CatName",
+      botToken: "not-a-token",
+    });
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(firstIssue(parsed.error)).toMatch(/valid bot token from @BotFather/i);
+    }
+  });
+
+  it("rejects an empty-string botToken (must be valid or omitted)", () => {
+    const parsed = telegramImportSchema.safeParse({
+      packLink: "https://t.me/addstickers/CatName",
+      botToken: "",
+    });
+    // Empty string → trimmed → still empty → does not match the regex → rejected.
+    expect(parsed.success).toBe(false);
+  });
+
+  it("exposes the storage key constant (used by client localStorage)", () => {
+    expect(TELEGRAM_BOT_TOKEN_STORAGE_KEY).toBe("chat.telegramBotToken");
   });
 });
 

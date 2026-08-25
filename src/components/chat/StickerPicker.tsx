@@ -1,11 +1,28 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import dynamic from "next/dynamic";
-import { Search, Star, Clock, Loader2, Upload, Link as LinkIcon } from "lucide-react";
+import {
+  Search,
+  Star,
+  Clock,
+  Loader2,
+  Upload,
+  Link as LinkIcon,
+  Key,
+  Eye,
+  EyeOff,
+  Check,
+  ExternalLink,
+  ChevronLeft,
+} from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useStickerPickerStore } from "@/stores/sticker-picker-store";
+import {
+  TELEGRAM_BOT_TOKEN_RE,
+  TELEGRAM_BOT_TOKEN_STORAGE_KEY,
+} from "@shared/constants";
 import type { StickerDTO } from "@shared/types";
 
 // Lottie is only loaded when an animated (.tgs/.json) sticker needs to render.
@@ -59,6 +76,21 @@ export function StickerPicker({
     void loadPacks();
     void loadRecent();
   }, [loadPacks, loadRecent]);
+
+  // Active-tab auto-scroll: when the active tab changes (including the very
+  // first activation after packs load), scroll it fully into view inside the
+  // horizontal tab strip. Without this, the active tab can sit just past the
+  // right edge of the visible strip and look "cut off" — the exact bug the
+  // user reported.
+  const tabStripRef = useRef<HTMLDivElement | null>(null);
+  const activeTabRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    const strip = tabStripRef.current;
+    const tab = activeTabRef.current;
+    if (!strip || !tab) return;
+    // Use nearest so we don't disrupt manual scrolling more than necessary.
+    tab.scrollIntoView({ behavior: "auto", block: "nearest", inline: "nearest" });
+  }, [activeTab, packs]);
 
   // Compute the visible stickers for the active tab.
   const visibleStickers: StickerDTO[] = useMemo(() => {
@@ -122,15 +154,23 @@ export function StickerPicker({
       role="dialog"
       aria-label="Sticker picker"
     >
-      {/* Tab strip */}
+      {/* Tab strip — `overflow-x-auto` for horizontal scrolling when there
+          are many packs. `pr-3` + `scroll-pr-3` give the last tab full
+          breathing room so it doesn't get clipped by the picker's
+          `overflow-hidden` rounded right edge — the exact bug the user
+          reported ("sticker tab loads on an edge and gets cut"). */}
       <div
-        className="flex items-center gap-1 overflow-x-auto scrollbar-thin px-1 py-1 border-b border-border bg-surface-container"
+        ref={tabStripRef}
+        className="flex items-center gap-1 overflow-x-auto scrollbar-thin pl-1.5 pr-3 py-1 border-b border-border bg-surface-container [scroll-padding-left:6px] [scroll-padding-right:12px]"
         role="tablist"
         aria-label="Sticker pack tabs"
       >
         {tabs.map((tab) => (
           <button
             key={tab.id}
+            ref={(el) => {
+              if (activeTab === tab.id) activeTabRef.current = el;
+            }}
             type="button"
             role="tab"
             aria-selected={activeTab === tab.id}
@@ -365,6 +405,99 @@ export function StickerImage({
 // Modals — Add Telegram pack + Upload sticker
 // ---------------------------------------------------------------------------
 
+/**
+ * Reads/writes the per-user Telegram bot token in localStorage. The token
+ * is per-device (per-browser) — the server never persists it. It's only
+ * sent in the body of POST /api/stickers/import-telegram.
+ *
+ * Uses `useSyncExternalStore` so the value is hydrated without triggering
+ * the `set-state-in-effect` anti-pattern (which causes cascading renders).
+ * The subscription listens for cross-tab `storage` events; same-tab
+ * mutations done via `save` / `clear` are also propagated by dispatching
+ * a custom event that the same-tab listener picks up (the `storage` event
+ * only fires for OTHER tabs, not the tab that made the change).
+ */
+const _TG_TOKEN_EVENT = "chat:telegram-bot-token-change";
+
+function _tgTokenRead(): string | null {
+  try {
+    return localStorage.getItem(TELEGRAM_BOT_TOKEN_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function _tgTokenSubscribe(callback: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener("storage", callback);
+  window.addEventListener(_TG_TOKEN_EVENT, callback);
+  return () => {
+    window.removeEventListener("storage", callback);
+    window.removeEventListener(_TG_TOKEN_EVENT, callback);
+  };
+}
+
+// Hydration flag — server snapshot is `false`, client snapshot is `true`.
+// Using `useSyncExternalStore` for this avoids the `set-state-in-effect`
+// anti-pattern that `useState(false) + useEffect(setHydrated(true))` would
+// trigger, while still letting the picker render a tiny skeleton instead
+// of flashing the "no token" UI for one frame before localStorage resolves.
+const _hydratedSubscribe = () => () => {};
+const _hydratedGetClient = () => true;
+const _hydratedGetServer = () => false;
+
+function useTelegramBotToken() {
+  // Server snapshot is null so SSR + first client render match — avoiding
+  // hydration mismatch warnings. After hydration, `getSnapshot` reads the
+  // actual localStorage value, triggering a single re-render if it differs.
+  const token = useSyncExternalStore(
+    _tgTokenSubscribe,
+    _tgTokenRead,
+    () => null,
+  );
+  const hydrated = useSyncExternalStore(
+    _hydratedSubscribe,
+    _hydratedGetClient,
+    _hydratedGetServer,
+  );
+
+  const save = useCallback((next: string) => {
+    const trimmed = next.trim();
+    try {
+      if (trimmed) localStorage.setItem(TELEGRAM_BOT_TOKEN_STORAGE_KEY, trimmed);
+      else localStorage.removeItem(TELEGRAM_BOT_TOKEN_STORAGE_KEY);
+    } catch {
+      /* swallow */
+    }
+    // Notify the same-tab subscription (the `storage` event only fires for
+    // other tabs).
+    window.dispatchEvent(new Event(_TG_TOKEN_EVENT));
+  }, []);
+
+  const clear = useCallback(() => {
+    try {
+      localStorage.removeItem(TELEGRAM_BOT_TOKEN_STORAGE_KEY);
+    } catch {
+      /* swallow */
+    }
+    window.dispatchEvent(new Event(_TG_TOKEN_EVENT));
+  }, []);
+
+  return { token, hydrated, save, clear };
+}
+
+/** Shows the last 4 chars of the secret hash, hides the rest. */
+function maskToken(token: string): string {
+  // Token format: "<bot_id>:<hash>". Keep the bot id visible (it's not
+  // secret), mask everything but the last 4 of the hash.
+  const idx = token.indexOf(":");
+  if (idx < 0) return "•".repeat(token.length);
+  const botId = token.slice(0, idx);
+  const hash = token.slice(idx + 1);
+  if (hash.length <= 4) return `${botId}:${"•".repeat(hash.length)}`;
+  return `${botId}:${"•".repeat(hash.length - 4)}${hash.slice(-4)}`;
+}
+
 function TelegramImportModal({
   onClose,
   onImported,
@@ -372,9 +505,16 @@ function TelegramImportModal({
   onClose: () => void;
   onImported: () => void;
 }) {
+  const { token, hydrated, save, clear } = useTelegramBotToken();
   const [packLink, setPackLink] = useState("");
+  const [showTokenForm, setShowTokenForm] = useState(false);
+  const [draftToken, setDraftToken] = useState("");
+  const [showTokenSecret, setShowTokenSecret] = useState(false);
+  const [tokenError, setTokenError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const hasToken = !!token;
 
   const submit = async () => {
     setLoading(true);
@@ -383,7 +523,11 @@ function TelegramImportModal({
       const res = await fetch("/api/stickers/import-telegram", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ packLink: packLink.trim() }),
+        body: JSON.stringify({
+          packLink: packLink.trim(),
+          // Send the saved token. If null, the server falls back to env var.
+          botToken: token ?? undefined,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -400,52 +544,232 @@ function TelegramImportModal({
     }
   };
 
+  const saveToken = () => {
+    const trimmed = draftToken.trim();
+    if (!trimmed) {
+      setTokenError("Paste your bot token first.");
+      return;
+    }
+    if (!TELEGRAM_BOT_TOKEN_RE.test(trimmed)) {
+      setTokenError("Enter a valid token — format is <bot_id>:<hash> from @BotFather.");
+      return;
+    }
+    save(trimmed);
+    setDraftToken("");
+    setTokenError(null);
+    setShowTokenForm(false);
+    toast.success("Telegram bot token saved");
+  };
+
+  const removeToken = () => {
+    clear();
+    setDraftToken("");
+    setShowTokenForm(false);
+    setTokenError(null);
+    toast.success("Telegram bot token removed");
+  };
+
+  // ---- Body — switches between the token-setup form and the pack-link form
+  // so the user is funnelled through the token step before they can import.
+  // If a token is already saved, the pack-link form renders by default with
+  // a small "Edit token" link below it.
   return (
     <div
       className="absolute inset-0 z-40 flex flex-col bg-popover text-popover-foreground p-3 gap-2"
       role="dialog"
       aria-label="Add a Telegram sticker pack"
     >
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold">Add a Telegram sticker pack</p>
+      {/* Header — title row changes depending on sub-screen */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 min-w-0">
+          {showTokenForm && (
+            <button
+              type="button"
+              onClick={() => {
+                setShowTokenForm(false);
+                setTokenError(null);
+                setDraftToken("");
+              }}
+              className="shrink-0 text-muted-foreground hover:text-foreground rounded-full p-0.5 focus-visible:outline-2 focus-visible:outline-ring"
+              aria-label="Back to pack link"
+            >
+              <ChevronLeft className="h-4 w-4" aria-hidden />
+            </button>
+          )}
+          <p className="text-sm font-semibold truncate">
+            {showTokenForm
+              ? hasToken
+                ? "Edit Telegram token"
+                : "Add your Telegram bot token"
+              : "Add a Telegram sticker pack"}
+          </p>
+        </div>
         <button
           type="button"
           onClick={onClose}
-          className="text-muted-foreground hover:text-foreground text-sm"
+          className="shrink-0 text-muted-foreground hover:text-foreground text-sm focus-visible:outline-2 focus-visible:outline-ring rounded"
           aria-label="Close"
         >
           Cancel
         </button>
       </div>
-      <input
-        type="url"
-        value={packLink}
-        onChange={(e) => setPackLink(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && packLink.trim() && !loading) void submit();
-        }}
-        placeholder="https://t.me/addstickers/PackName"
-        autoFocus
-        disabled={loading}
-        aria-label="Telegram pack link"
-        className="w-full rounded-[12px] border border-border bg-surface-container-high px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      />
-      <p className="text-[11px] text-muted-foreground">
-        Paste a Telegram sticker pack link. The pack lands in your personal library — only you can use it.
-      </p>
-      {error && (
-        <p className="text-xs text-destructive" role="alert">
-          {error}
-        </p>
+
+      {!hydrated ? (
+        <div className="flex-1 flex items-center justify-center">
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden />
+        </div>
+      ) : showTokenForm ? (
+        // ---- Token form ----
+        <>
+          <p className="text-[11px] text-muted-foreground leading-relaxed">
+            Create a bot with{" "}
+            <a
+              href="https://t.me/BotFather"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-0.5 text-primary hover:underline align-baseline"
+            >
+              @BotFather
+              <ExternalLink className="h-3 w-3" aria-hidden />
+            </a>{" "}
+            → send{" "}
+            <code className="rounded bg-surface-container-high px-1 py-0.5 text-[10px]">/newbot</code>
+            {" "}→ copy the token it gives you. We store it only in this browser and send it
+            with each import request — never to our database.
+          </p>
+          <div className="relative">
+            <input
+              type={showTokenSecret ? "text" : "password"}
+              value={draftToken}
+              onChange={(e) => {
+                setDraftToken(e.target.value);
+                setTokenError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveToken();
+              }}
+              placeholder="1234567890:AAH…-…-…"
+              autoFocus
+              spellCheck={false}
+              autoComplete="off"
+              aria-label="Telegram bot token"
+              className="w-full rounded-[12px] border border-border bg-surface-container-high px-3 py-2 pr-9 text-sm font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+            <button
+              type="button"
+              onClick={() => setShowTokenSecret((s) => !s)}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground rounded p-1 focus-visible:outline-2 focus-visible:outline-ring"
+              aria-label={showTokenSecret ? "Hide token" : "Show token"}
+              tabIndex={-1}
+            >
+              {showTokenSecret ? <EyeOff className="h-4 w-4" aria-hidden /> : <Eye className="h-4 w-4" aria-hidden />}
+            </button>
+          </div>
+          {tokenError && (
+            <p className="text-xs text-destructive" role="alert">
+              {tokenError}
+            </p>
+          )}
+          <div className="flex items-center gap-2 mt-1">
+            <button
+              type="button"
+              onClick={saveToken}
+              className="flex-1 rounded-full bg-primary text-primary-foreground text-sm font-medium py-2 px-3 hover:bg-primary/90 transition-colors focus-visible:outline-2 focus-visible:outline-ring"
+            >
+              Save token
+            </button>
+            {hasToken && (
+              <button
+                type="button"
+                onClick={removeToken}
+                className="rounded-full text-destructive hover:bg-destructive/10 text-sm font-medium py-2 px-3 transition-colors focus-visible:outline-2 focus-visible:outline-ring"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+        </>
+      ) : !hasToken ? (
+        // ---- No token yet — funnel user to token form ----
+        <>
+          <p className="text-[11px] text-muted-foreground leading-relaxed">
+            To import a pack you first need a Telegram bot token. We&apos;ll store it
+            in this browser only — never in our database.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setShowTokenForm(true);
+              setDraftToken("");
+              setTokenError(null);
+            }}
+            className="w-full rounded-[12px] border border-dashed border-border bg-surface-container-high px-3 py-3 text-sm text-muted-foreground hover:bg-surface-container-highest hover:text-foreground transition-colors flex items-center justify-center gap-2 focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            <Key className="h-4 w-4" aria-hidden />
+            Add your Telegram bot token
+          </button>
+        </>
+      ) : (
+        // ---- Pack link form (token already saved) ----
+        <>
+          <input
+            type="url"
+            value={packLink}
+            onChange={(e) => setPackLink(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && packLink.trim() && !loading) void submit();
+            }}
+            placeholder="https://t.me/addstickers/PackName"
+            autoFocus
+            disabled={loading}
+            aria-label="Telegram pack link"
+            className="w-full rounded-[12px] border border-border bg-surface-container-high px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+          <p className="text-[11px] text-muted-foreground">
+            Paste a Telegram sticker pack link. The pack lands in your personal library — only you can use it.
+          </p>
+          {/* Saved-token chip with an "edit" action so users can update or
+              replace the token without re-doing the whole import flow. */}
+          <div className="flex items-center justify-between gap-2 rounded-[12px] bg-surface-container-high border border-border px-2.5 py-1.5">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span
+                className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-primary/10 text-primary shrink-0"
+                aria-hidden
+              >
+                <Check className="h-3 w-3" />
+              </span>
+              <span className="text-[11px] text-muted-foreground truncate">
+                Token saved —{" "}
+                <code className="font-mono">{maskToken(token!)}</code>
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setShowTokenForm(true);
+                setDraftToken("");
+                setTokenError(null);
+              }}
+              className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/10 transition-colors focus-visible:outline-2 focus-visible:outline-ring"
+            >
+              Edit
+            </button>
+          </div>
+          {error && (
+            <p className="text-xs text-destructive" role="alert">
+              {error}
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={() => void submit()}
+            disabled={loading || !packLink.trim()}
+            className="mt-1 rounded-full bg-primary text-primary-foreground text-sm font-medium py-2 px-3 disabled:opacity-50 hover:bg-primary/90 transition-colors focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            {loading ? "Importing…" : "Import pack"}
+          </button>
+        </>
       )}
-      <button
-        type="button"
-        onClick={() => void submit()}
-        disabled={loading || !packLink.trim()}
-        className="mt-1 rounded-full bg-primary text-primary-foreground text-sm font-medium py-2 px-3 disabled:opacity-50 hover:bg-primary/90 transition-colors focus-visible:outline-2 focus-visible:outline-ring"
-      >
-        {loading ? "Importing…" : "Import pack"}
-      </button>
     </div>
   );
 }

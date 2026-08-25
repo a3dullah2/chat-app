@@ -2,14 +2,17 @@
 //
 // Flow (see README §3 — Telegram pack import):
 //   1. parsePackName(packLink)  → "CatName"  (validated against TELEGRAM_PACK_LINK_RE)
-//   2. getStickerSet(packName) → StickerSet (list of stickers + thumb file_id)
-//   3. For each sticker: getFile(file_id) → file_path → downloadFile(file_path)
+//   2. getStickerSet(packName, token) → StickerSet (list of stickers + thumb file_id)
+//   3. For each sticker: getFile(file_id, token) → file_path → downloadFile(file_path, token)
 //   4. Post-process: .tgs → gunzip + store as .json (Lottie)
 //                    .webp/.png/.webm → store as-is
 //
 // All HTTP calls go through Telegram's Bot API at https://api.telegram.org.
-// The bot token is read from process.env.TELEGRAM_BOT_TOKEN and NEVER
-// returned to the client.
+// The bot token is resolved per-call via `resolveToken(provided?)`:
+//   1. If the caller passes a token (from the in-app Sticker Picker UI), use it.
+//   2. Otherwise fall back to process.env.TELEGRAM_BOT_TOKEN (self-hosted setups).
+//   3. If neither is set, throw TelegramImportError("TOKEN_MISSING").
+// The token is NEVER returned to the client.
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -48,16 +51,21 @@ export function parsePackName(packLink: string): string | null {
   return name;
 }
 
-/** Returns the bot token from env, or throws a friendly error. */
-function requireBotToken(): string {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token || token.length < 16) {
-    throw new TelegramImportError(
-      "Telegram bot token is not configured on the server. Set TELEGRAM_BOT_TOKEN.",
-      "TOKEN_MISSING",
-    );
-  }
-  return token;
+/**
+ * Resolves the bot token to use for this call. Prefers a caller-provided
+ * token (from the Sticker Picker UI), then falls back to the env var so
+ * self-hosted deployments that pre-configured TELEGRAM_BOT_TOKEN keep working.
+ * Throws TelegramImportError("TOKEN_MISSING") if neither is available.
+ */
+function resolveToken(provided?: string | null): string {
+  const trimmed = provided?.trim();
+  if (trimmed && trimmed.length >= 16) return trimmed;
+  const envToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (envToken && envToken.length >= 16) return envToken;
+  throw new TelegramImportError(
+    "No Telegram bot token configured. Add one in the Sticker Picker → Add Telegram pack → Token settings, or set TELEGRAM_BOT_TOKEN on the server.",
+    "TOKEN_MISSING",
+  );
 }
 
 export class TelegramImportError extends Error {
@@ -99,8 +107,11 @@ async function tgFetch<T>(token: string, method: string, params: Record<string, 
 }
 
 /** Calls Telegram's getStickerSet endpoint. */
-export async function getStickerSet(packName: string): Promise<TelegramStickerSet> {
-  const token = requireBotToken();
+export async function getStickerSet(
+  packName: string,
+  botToken?: string | null,
+): Promise<TelegramStickerSet> {
+  const token = resolveToken(botToken);
   const result = await tgFetch<{
     name: string;
     title: string;
@@ -136,15 +147,18 @@ interface TgFile {
 }
 
 /** Calls getFile to resolve a file_id to a CDN path. */
-export async function getFile(fileId: string): Promise<TgFile> {
-  const token = requireBotToken();
+export async function getFile(fileId: string, botToken?: string | null): Promise<TgFile> {
+  const token = resolveToken(botToken);
   return tgFetch<TgFile>(token, "getFile", { file_id: fileId });
 }
 
 /** Downloads the actual sticker bytes from Telegram's file CDN. */
-export async function downloadFile(fileId: string): Promise<{ buffer: Buffer; mimeType: string; ext: string }> {
-  const token = requireBotToken();
-  const file = await getFile(fileId);
+export async function downloadFile(
+  fileId: string,
+  botToken?: string | null,
+): Promise<{ buffer: Buffer; mimeType: string; ext: string }> {
+  const token = resolveToken(botToken);
+  const file = await getFile(fileId, token);
   if (file.file_size && file.file_size > MAX_STICKER_SIZE_BYTES * 4) {
     // Allow up to 2 MB on the wire — .tgs gzips are small but the cap is
     // permissive enough to avoid breaking valid packs while still rejecting

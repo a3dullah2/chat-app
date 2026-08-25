@@ -2,7 +2,7 @@
 // All schemas reject unknown fields. Zod v4.
 
 import { z } from "zod";
-import { MAX_TEXT_LENGTH } from "./constants";
+import { MAX_TEXT_LENGTH, TELEGRAM_BOT_TOKEN_RE } from "./constants";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -56,6 +56,18 @@ export const telegramImportSchema = z.strictObject({
       /^https?:\/\/(?:t\.me|telegram\.me)\/addstickers\/[A-Za-z0-9_]+$/,
       "Enter a valid Telegram sticker link (e.g. https://t.me/addstickers/PackName)",
     ),
+  /**
+   * Optional per-user Telegram bot token (entered in the Sticker Picker UI).
+   * If omitted, the server falls back to process.env.TELEGRAM_BOT_TOKEN so
+   * self-hosted deployments that pre-configured the env var keep working.
+   * The token is NEVER persisted server-side — it's only used in this
+   * request's Telegram API calls.
+   */
+  botToken: z
+    .string()
+    .trim()
+    .regex(TELEGRAM_BOT_TOKEN_RE, "Enter a valid bot token from @BotFather")
+    .optional(),
 });
 
 export const stickerUploadSchema = z.strictObject({
