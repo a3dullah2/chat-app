@@ -1,0 +1,152 @@
+// ChatApp schema — adapted for SQLite (environment constraint; spec §6 targeted PostgreSQL).
+// Deviations from spec: enums are stored as validated strings (SQLite has no enums),
+// Message.clientId added for send idempotency, Attachment.messageId is nullable
+// (uploads are created unattached and linked when a message is sent), and
+// Attachment.storageKey / uploadedById + HiddenMessage were added (see README).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  phone        String?  @unique
+  passwordHash String
+  avatarUrl    String?
+  about        String   @default("Hey there! I am using ChatApp.")
+  isOnline     Boolean  @default(false)
+  lastSeenAt   DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  participants     Participant[]
+  messages         Message[]
+  reactions        Reaction[]
+  statuses         MessageStatus[]
+  hiddenMessages   HiddenMessage[]
+  conversationsCreated Conversation[]
+}
+
+model Conversation {
+  id          String   @id @default(cuid())
+  type        String // "DIRECT" | "GROUP"
+  name        String?
+  avatarUrl   String?
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt // bumped on every new message (list sorting)
+
+  createdBy   User         @relation(fields: [createdById], references: [id])
+  participants Participant[]
+  messages     Message[]
+
+  @@index([updatedAt])
+}
+
+model Participant {
+  id             String    @id @default(cuid())
+  userId         String
+  conversationId String
+  role           String    @default("MEMBER") // "OWNER" | "ADMIN" | "MEMBER"
+  lastReadAt     DateTime  @default(now())
+  isMuted        Boolean   @default(false)
+  isPinned       Boolean   @default(false)
+  isArchived     Boolean   @default(false)
+  joinedAt       DateTime  @default(now())
+  leftAt         DateTime?
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, conversationId])
+  @@index([conversationId])
+}
+
+model Message {
+  id             String    @id @default(cuid())
+  clientId       String?   @unique // idempotent sends / retries
+  conversationId String
+  senderId       String
+  type           String    @default("TEXT") // TEXT | IMAGE | VIDEO | AUDIO | FILE | SYSTEM
+  text           String?
+  replyToId      String?
+  editedAt       DateTime?
+  deletedAt      DateTime?
+  createdAt      DateTime  @default(now())
+
+  conversation Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User             @relation(fields: [senderId], references: [id])
+  replyTo      Message?         @relation("Reply", fields: [replyToId], references: [id])
+  replies      Message[]        @relation("Reply")
+  attachments  Attachment[]
+  reactions    Reaction[]
+  statuses     MessageStatus[]
+  hiddenBy     HiddenMessage[]
+
+  @@index([conversationId, createdAt])
+}
+
+model Attachment {
+  id           String   @id @default(cuid())
+  messageId    String? // nullable: created unattached on upload, linked on send
+  uploadedById String?
+  storageKey   String   @unique
+  url          String
+  mimeType     String
+  size         Int // bytes
+  fileName     String
+  durationSec  Int? // voice notes / video
+  width        Int?
+  height       Int?
+  thumbnailUrl String?
+
+  message Message? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+}
+
+model MessageStatus {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String // recipient this status row tracks
+  status    String   @default("SENT") // "SENT" | "DELIVERED" | "READ"
+  updatedAt DateTime @updatedAt
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+}
+
+model Reaction {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+}
+
+// "Delete for me": hides a message for one user only (spec FR-04 AC8)
+model HiddenMessage {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+}

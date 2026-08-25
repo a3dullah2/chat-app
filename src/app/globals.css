@@ -1,0 +1,188 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jetbrains-mono);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  /* ChatApp tokens — Stoat (Material 3 tonal-spot, accent #5470ec) */
+  --color-panel: var(--panel);
+  --color-panel-header: var(--panel-header);
+  --color-chat-bg: var(--chat-bg);
+  --color-surface-variant: var(--surface-variant);
+  --color-surface-container: var(--surface-container);
+  --color-surface-container-high: var(--surface-container-high);
+  --color-surface-container-highest: var(--surface-container-highest);
+  --color-primary-container: var(--primary-container);
+  --color-primary-container-foreground: var(--primary-container-foreground);
+  --color-secondary-container: var(--secondary-container);
+  --color-secondary-container-foreground: var(--secondary-container-foreground);
+  --color-tick-read: var(--tick-read);
+  --color-badge-unread: var(--badge-unread);
+  --color-presence-online: var(--presence-online);
+  --color-presence-offline: var(--presence-offline);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 4px);
+  --radius-xl: calc(var(--radius) + 16px);
+}
+
+:root {
+  /* Material 3 shape scale — xs 4 / sm 8 / md 12 / lg 16 / xl 28 */
+  --radius: 0.75rem;
+
+  /*
+   * Stoat for Web theme (generated with @material/material-color-utilities,
+   * SchemeTonalSpot, accent #5470ec, contrast 0) — light scheme.
+   */
+  --background: #e9e7ef; /* shell behind rounded panels (surface-container-high) */
+  --foreground: #1b1b21; /* on-surface */
+  --card: #ffffff; /* surface-container-lowest */
+  --card-foreground: #1b1b21;
+  --popover: #e9e7ef;
+  --popover-foreground: #1b1b21;
+  --primary: #505b92;
+  --primary-foreground: #ffffff;
+  --primary-container: #dde1ff;
+  --primary-container-foreground: #384379;
+  --secondary: #dfe1f9; /* secondary-container (tonal surfaces) */
+  --secondary-foreground: #424659;
+  --secondary-container: #dfe1f9;
+  --secondary-container-foreground: #424659;
+  --muted: #e3e1e9; /* surface-container-highest */
+  --muted-foreground: #45464f; /* on-surface-variant */
+  --accent: #e3e1e9;
+  --accent-foreground: #1b1b21;
+  --destructive: #ba1a1a;
+  --destructive-foreground: #ffffff;
+  --border: #c6c5d0; /* outline-variant */
+  --input: #e3e1e9;
+  --ring: #505b92;
+  --panel: #f5f2fa; /* sidebar — surface-container-low */
+  --panel-header: #f5f2fa;
+  --chat-bg: #ffffff; /* message surface — surface-container-lowest */
+  --surface-variant: #e3e1ec;
+  --surface-container: #efedf4;
+  --surface-container-high: #e9e7ef;
+  --surface-container-highest: #e3e1e9;
+  --tick-read: #4799F0; /* Stoat brand "focus" blue */
+  --badge-unread: #ba1a1a; /* error */
+  --presence-online: #3abf7e;
+  --presence-offline: #a5a5a5;
+}
+
+.dark {
+  /* Stoat dark scheme (same source). */
+  --background: #191919; /* Stoat's neutral shell colour */
+  --foreground: #e3e1e9; /* on-surface */
+  --card: #292a2f; /* surface-container-high */
+  --card-foreground: #e3e1e9;
+  --popover: #292a2f;
+  --popover-foreground: #e3e1e9;
+  --primary: #b9c3ff;
+  --primary-foreground: #202c61;
+  --primary-container: #384379;
+  --primary-container-foreground: #dde1ff;
+  --secondary: #424659; /* secondary-container */
+  --secondary-foreground: #dfe1f9;
+  --secondary-container: #424659;
+  --secondary-container-foreground: #dfe1f9;
+  --muted: #34343a; /* surface-container-highest */
+  --muted-foreground: #c6c5d0; /* on-surface-variant */
+  --accent: #34343a;
+  --accent-foreground: #e3e1e9;
+  --destructive: #ffb4ab;
+  --destructive-foreground: #690005;
+  --border: #45464f; /* outline-variant */
+  --input: #34343a;
+  --ring: #b9c3ff;
+  --panel: #1b1b21; /* sidebar — surface-container-low */
+  --panel-header: #1b1b21;
+  --chat-bg: #0d0e13; /* message surface — surface-container-lowest */
+  --surface-variant: #45464f;
+  --surface-container: #1f1f25;
+  --surface-container-high: #292a2f;
+  --surface-container-highest: #34343a;
+  --tick-read: #4799f0;
+  --badge-unread: #f84848; /* Stoat brand busy red */
+  --presence-online: #3abf7e;
+  --presence-offline: #a5a5a5;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-inter), "Inter", system-ui, sans-serif;
+  }
+  html,
+  body {
+    height: 100%;
+  }
+}
+
+/* Thin, unobtrusive scrollbars (Stoat uses near-invisible ones) */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted-foreground) 35%, transparent) transparent;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted-foreground) 35%, transparent);
+  border-radius: 3px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Highlight animation when jumping to a message from search (primary-container) */
+@keyframes message-flash {
+  0% {
+    background-color: color-mix(in srgb, var(--primary-container) 80%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+.message-flash {
+  animation: message-flash 1.6s ease-out;
+}
+
+/* Voice note recording bars */
+@keyframes voice-pulse {
+  0%,
+  100% {
+    transform: scaleY(0.4);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+.voice-bar {
+  animation: voice-pulse 1s ease-in-out infinite;
+}
