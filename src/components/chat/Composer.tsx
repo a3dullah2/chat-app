@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Mic, Send, Smile, X, FileText, Loader2, CornerUpLeft, Pencil, Plus } from "lucide-react";
+import { Mic, Send, Smile, Sticker, X, FileText, Loader2, CornerUpLeft, Pencil, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { getSocket } from "@/lib/socket";
 import { useSendMessage } from "@/hooks/useChatData";
@@ -9,6 +9,7 @@ import { useUIStore } from "@/stores/ui-store";
 import { useDraftsStore } from "@/stores/drafts-store";
 import { VoiceRecorder } from "@/components/chat/VoiceRecorder";
 import { EmojiGrid } from "@/components/emoji/EmojiPicker";
+import { StickerPicker } from "@/components/chat/StickerPicker";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -65,6 +66,7 @@ export function Composer({
   const [recording, setRecording] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [stickerPickerOpen, setStickerPickerOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
@@ -338,6 +340,19 @@ export function Composer({
     });
   };
 
+  const sendSticker = useCallback(
+    async (sticker: { id: string }) => {
+      // Stickers are sent as their own STICKER message — no text, no caption.
+      setStickerPickerOpen(false);
+      emitTyping(false);
+      await send(conversation.id, {
+        type: "STICKER",
+        stickerId: sticker.id,
+      });
+    },
+    [conversation.id, send, emitTyping],
+  );
+
   if (recording) {
     return (
       <VoiceRecorder
@@ -523,6 +538,33 @@ export function Composer({
             <Mic className="h-5 w-5" aria-hidden />
           </Button>
         )}
+
+        <Popover open={stickerPickerOpen} onOpenChange={setStickerPickerOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-muted-foreground shrink-0 size-10 hover:bg-surface-container-highest"
+              aria-label="Open sticker picker"
+              aria-expanded={stickerPickerOpen}
+            >
+              <Sticker className="h-5 w-5" aria-hidden />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="end"
+            side="top"
+            className="p-0 rounded-[16px] border-border bg-popover shadow-lg"
+            collisionPadding={8}
+          >
+            <StickerPicker
+              onPickSticker={(sticker) => {
+                void sendSticker({ id: sticker.id });
+              }}
+              showAddActions={false}
+            />
+          </PopoverContent>
+        </Popover>
 
         <Popover open={emojiOpen} onOpenChange={setEmojiOpen}>
           <PopoverTrigger asChild>

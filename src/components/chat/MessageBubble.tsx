@@ -180,6 +180,179 @@ export const MessageBubble = memo(function MessageBubble({
     );
   }
 
+  // -------------------------------------------------------------------
+  // STICKER messages: 160×160 image, no bubble, no caption (Telegram style)
+  // -------------------------------------------------------------------
+  if (message.type === "STICKER" && message.sticker && !deleted) {
+    return (
+      <div
+        className={cn(
+          "group relative w-full rounded-[12px] transition-colors",
+          isFirstOfGroup ? "mt-3" : "mt-px",
+          !actionsOpen && "hover:bg-surface-container",
+        )}
+        data-mid={message.id}
+        onPointerDown={startLongPress}
+        onPointerUp={cancelLongPress}
+        onPointerLeave={cancelLongPress}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setActionsOpen(true);
+        }}
+      >
+        {/* Hover / long-press action toolbar — same as text messages */}
+        {menuOpen && (
+          <div
+            className="absolute -top-3.5 right-2 z-10 flex items-center gap-0.5 rounded-full border border-border/60 bg-surface-container-high px-1 py-0.5 shadow-lg"
+            role="toolbar"
+            aria-label="Sticker actions"
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setReactBarOpen((v) => !v);
+                setFullPickerOpen(false);
+              }}
+              className="h-7 w-7 rounded-full flex items-center justify-center text-muted-foreground hover:bg-surface-container-highest hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+              aria-label="React with an emoji"
+              aria-expanded={reactBarOpen || fullPickerOpen}
+            >
+              <Smile className="h-4 w-4" aria-hidden />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setReplyTo(message);
+                setActionsOpen(false);
+              }}
+              className="h-7 w-7 rounded-full flex items-center justify-center text-muted-foreground hover:bg-surface-container-highest hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+              aria-label="Reply to this sticker"
+            >
+              <CornerUpLeft className="h-4 w-4" aria-hidden />
+            </button>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setActionsOpen((v) => !v)}
+                className="h-7 w-7 rounded-full flex items-center justify-center text-muted-foreground hover:bg-surface-container-highest hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                aria-label="More sticker actions"
+                aria-expanded={actionsOpen}
+              >
+                <MoreVertical className="h-4 w-4" aria-hidden />
+              </button>
+              {actionsOpen && (
+                <div
+                  className="absolute top-8 right-0 z-20 w-48 rounded-[16px] border border-border bg-popover text-popover-foreground shadow-lg py-1.5"
+                  role="menu"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => deleteMessage(false)}
+                    className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none text-left"
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden />
+                    Delete for me
+                  </button>
+                  {canDeleteForEveryone && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => deleteMessage(true)}
+                      className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-destructive hover:bg-accent focus-visible:bg-accent focus-visible:outline-none text-left"
+                    >
+                      <Ban className="h-4 w-4" aria-hidden />
+                      Delete for everyone
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="flex w-full px-3 md:px-4 py-0.5">
+          {/* Avatar gutter (group only; otherwise just spacer) */}
+          <div className="w-[54px] shrink-0 flex justify-end pr-2 pt-0.5">
+            {isFirstOfGroup ? (
+              <Avatar name={message.sender.name} src={message.sender.avatarUrl} size="msg" />
+            ) : (
+              <span
+                className={cn(
+                  "text-[10.5px] leading-5 text-muted-foreground/80 transition-opacity",
+                  isLastOfGroup ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+                )}
+              >
+                {timeLabel}
+              </span>
+            )}
+          </div>
+
+          <div className={cn("flex-1 min-w-0 pr-4 flex flex-col", mine ? "items-end" : "items-start")}>
+            {isFirstOfGroup && (
+              <div className="flex items-baseline gap-2 flex-wrap min-w-0 mb-0.5">
+                <span
+                  className={cn(
+                    "text-[14px] font-semibold truncate max-w-[60%]",
+                    mine ? "text-primary" : senderColor(message.senderId),
+                  )}
+                >
+                  {mine ? "You" : message.sender.name}
+                </span>
+                <span className="text-[11px] text-muted-foreground/80 shrink-0">{timeLabel}</span>
+                {mine && !pending && !failed && (
+                  <Ticks status={message.status} className="h-3.5 w-3.5 shrink-0 -ml-1" />
+                )}
+                {failed && (
+                  <button
+                    type="button"
+                    onClick={retry}
+                    className="flex items-center gap-1 text-[11px] text-destructive hover:underline focus-visible:outline-2 focus-visible:outline-ring rounded"
+                    aria-label="Retry sending this sticker"
+                  >
+                    <Trash2 className="h-3 w-3 rotate-45" aria-hidden />
+                    Retry
+                  </button>
+                )}
+              </div>
+            )}
+            {/* Sticker image: 160×160 desktop, 120×120 mobile, no bubble */}
+            <img
+              src={message.sticker.url}
+              alt={message.sticker.emoji ? `${message.sticker.emoji} sticker` : "Sticker"}
+              draggable={false}
+              loading="lazy"
+              className="w-[120px] h-[120px] md:w-[160px] md:h-[160px] object-contain select-none pointer-events-auto"
+            />
+            {message.reactions.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1 relative z-[1] max-w-[200px]">
+                {message.reactions.map((r) => (
+                  <button
+                    key={r.emoji}
+                    type="button"
+                    onClick={() => toggleReaction(r.emoji)}
+                    title={r.users.join(", ")}
+                    aria-label={`${r.emoji} reaction, ${r.count}. ${r.reactedByMe ? "You reacted — click to remove" : "Click to react"}`}
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs transition-colors",
+                      "focus-visible:outline-2 focus-visible:outline-ring",
+                      r.reactedByMe
+                        ? "bg-primary-container border-primary/40 text-primary-container-foreground"
+                        : "bg-surface-container-high border-transparent text-foreground hover:bg-surface-container-highest",
+                    )}
+                  >
+                    <span aria-hidden>{r.emoji}</span>
+                    {r.count > 1 && <span className="font-medium text-[11px]">{r.count}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const timeLabel = formatTime(new Date(message.createdAt));
   const menuOpen = actionsOpen || reactBarOpen || fullPickerOpen;
 
