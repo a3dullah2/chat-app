@@ -29,6 +29,7 @@ A WhatsApp-style chat platform: accounts, direct & group chats, instant delivery
 | 🔐 **Auth** — JWT (HS256) in httpOnly cookies, signup/login/logout with inline validation, login rate-limit (10 / 15 min / IP). | 👥 **Users & profiles** — debounced search (300 ms), profile editing with avatar upload. | 💬 **Chat list** — pinned-first + activity ordering, type-aware previews ("📷 Photo", "🎤 Voice message (0:07)"), unread badges, context menu (pin/mute/archive/mark-read/leave). |
 | ✉️ **Messaging** — Enter/Shift+Enter, optimistic sends (clock → ✓ → ✓✓ → blue ✓✓), retry without duplicates, infinite scroll-up (30/page), date dividers + sender grouping, replies with jump-to-quote, edit (15-min, own, TEXT), delete for me/everyone. | 🖼️ **Media & voice** — attach / paste / drag-drop, image thumbnails + lightbox, inline video, file cards with download, MediaRecorder voice notes with timer/waveform/cancel, upload progress. | 👨‍👩‍👧 **Groups** — create with ≥2 participants + SYSTEM messages, info panel with roles, member add/remove (admin-only), rename, leave with ownership transfer; empty groups auto-deleted. |
 | ⌨️ **Typing & presence** — multi-typist labels in header and chat list, 5 s auto-expiry, online/last-seen subtitles. | ✅ **Read receipts** — SENT → DELIVERED → READ aggregation (worst-to-best), blue ticks in real time, unread cleared across tabs. | 🔔 **Notifications** — in-app toasts with Open action, browser notifications (permission requested on first interaction), `(N) ChatApp` title counter, muted chats excluded. |
+| 🏷️ **Stickers** — 3 bundled packs (Emojis, Cats, Hearts), Telegram pack import via `t.me/addstickers/<name>`, personal uploads, Recent + Favorites quick-access tabs, 160×160 no-bubble message rendering, Lottie animations for `.tgs` stickers, click-to-send from composer. | | |
 
 ## 🚀 Quick Start
 
@@ -122,6 +123,7 @@ bun run lint     # ESLint — zero warnings
 | `NEXT_PUBLIC_APP_URL` | Absolute URL for links / avatars | `http://localhost:3000` |
 | `MAX_UPLOAD_MB` | Upload size cap (default 25) | `25` |
 | `INTERNAL_SOCKET_TOKEN` | Shared secret for the REST → socket emit bridge | random string |
+| `TELEGRAM_BOT_TOKEN` | Optional. Bot token from [@BotFather](https://t.me/BotFather) for sticker pack imports | `1234567890:ABCdef…` |
 
 > ⚠️ **Never commit `.env`.** The repo ships a sanitized `.env.example` — copy it locally and fill in real values. Rotate any dev secrets before going to production.
 
